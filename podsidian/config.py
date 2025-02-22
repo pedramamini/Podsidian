@@ -1,9 +1,25 @@
 import os
 import tomli
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, List
+
+# Available Whisper models
+WHISPER_MODELS = {
+    'tiny.en', 'tiny', 'base.en', 'base', 'small.en', 'small',
+    'medium.en', 'medium', 'large-v1', 'large-v2', 'large-v3',
+    'large', 'large-v3-turbo'
+}
 
 DEFAULT_CONFIG = {
+    "podcasts": {
+        "ignore": []  # List of podcast titles to ignore
+    },
+    "whisper": {
+        "model": "large-v3",
+        "language": "",
+        "cpu_only": False,
+        "threads": 4
+    },
     "obsidian": {
         "vault_path": "~/Documents/Obsidian",
         "template": """# {title}
@@ -22,7 +38,9 @@ DEFAULT_CONFIG = {
     },
     "openrouter": {
         "api_key": "",  # Set via PODSIDIAN_OPENROUTER_API_KEY env var
-        "model": "anthropic/claude-2",
+        "model": "openai/gpt-4",
+        "processing_model": "openai/gpt-4",  # Model for topic detection and transcript correction
+        "topic_sample_size": 4000,  # Sample size for topic detection
         "prompt": """You are a helpful podcast summarizer. 
 Given the following podcast transcript, provide:
 1. A concise 2-3 paragraph summary of the key points
@@ -85,9 +103,47 @@ class Config:
         return self.config["openrouter"]["model"]
     
     @property
+    def openrouter_processing_model(self) -> str:
+        """Get model to use for topic detection and transcript correction."""
+        return self.config["openrouter"]["processing_model"]
+    
+    @property
+    def topic_sample_size(self) -> int:
+        """Get sample size for topic detection."""
+        return self.config["openrouter"]["topic_sample_size"]
+    
+    @property
     def openrouter_prompt(self) -> str:
         """Get the configured prompt template."""
         return self.config["openrouter"]["prompt"]
+    
+    @property
+    def whisper_model(self) -> str:
+        """Get the configured Whisper model size."""
+        model = self.config["whisper"]["model"]
+        if model not in WHISPER_MODELS:
+            raise ValueError(f"Invalid Whisper model: {model}. Must be one of: {', '.join(WHISPER_MODELS)}")
+        return model
+    
+    @property
+    def whisper_language(self) -> Optional[str]:
+        """Get the configured language for Whisper."""
+        return self.config["whisper"]["language"] or None
+    
+    @property
+    def whisper_cpu_only(self) -> bool:
+        """Whether to use CPU only for Whisper inference."""
+        return self.config["whisper"]["cpu_only"]
+    
+    @property
+    def whisper_threads(self) -> int:
+        """Number of threads to use for CPU inference."""
+        return self.config["whisper"]["threads"]
+    
+    @property
+    def ignore_podcasts(self) -> List[str]:
+        """Get list of podcast titles to ignore."""
+        return self.config["podcasts"]["ignore"]
 
 # Global config instance
 config = Config()

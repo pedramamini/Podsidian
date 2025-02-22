@@ -8,6 +8,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
 from sqlalchemy.orm import Session
+
+# Set tokenizers parallelism before importing transformers
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 from sentence_transformers import SentenceTransformer
 
 from .models import Podcast, Episode
@@ -24,9 +27,26 @@ class PodcastProcessor:
         self.config = config
         
     def _load_whisper(self):
-        """Lazy load whisper model."""
+        """Lazy load whisper model with configured options."""
         if not self.whisper_model:
-            self.whisper_model = whisper.load_model("base")
+            import torch
+            import warnings
+            
+            # Suppress FP16 warning on CPU
+            warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
+            
+            # Set device based on config and availability
+            if self.config.whisper_cpu_only:
+                device = "cpu"
+                if self.config.whisper_threads > 0:
+                    torch.set_num_threads(self.config.whisper_threads)
+            else:
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            
+            self.whisper_model = whisper.load_model(
+                self.config.whisper_model,
+                device=device
+            )
     
     def _load_embedding_model(self):
         """Lazy load sentence transformer model."""
@@ -45,11 +65,102 @@ class PodcastProcessor:
         temp.close()
         return temp.name
     
-    def _transcribe_audio(self, audio_path: str) -> str:
-        """Transcribe audio file using whisper."""
+    def _detect_topic(self, title: str, transcript_sample: str) -> str:
+        """Detect the main topic/domain of the podcast using OpenRouter."""
+        headers = {
+            "Authorization": f"Bearer {self.config.openrouter_api_key}",
+            "HTTP-Referer": "https://github.com/pedramamini/podsidian",
+        }
+        
+        # Prompt to detect the professional domain
+        prompt = f"""Given the following podcast title and transcript sample, determine the specific professional or technical domain this content belongs to. Focus on identifying specialized fields that might have unique terminology (e.g., Brazilian Jiu-Jitsu, Quantum Physics, Constitutional Law, etc.).
+
+Title: {title}
+
+Transcript Sample:
+{transcript_sample}
+
+Respond with just the domain name, nothing else."""
+        
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": self.config.openrouter_processing_model,
+                "messages": [{
+                    "role": "user",
+                    "content": prompt
+                }]
+            }
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+
+    def _correct_transcript(self, transcript: str, domain: str) -> str:
+        """Correct transcript using domain-specific knowledge."""
+        headers = {
+            "Authorization": f"Bearer {self.config.openrouter_api_key}",
+            "HTTP-Referer": "https://github.com/pedramamini/podsidian",
+        }
+        
+        # Prompt for domain-specific correction
+        prompt = f"""You are a professional transcriptionist with extensive expertise in {domain}. Your task is to correct any technical terms, jargon, or domain-specific language in this transcript that might have been misinterpreted during speech-to-text conversion.
+
+Focus on:
+1. Technical terminology specific to {domain}
+2. Names of key figures or concepts in the field
+3. Specialized vocabulary and acronyms
+4. Common terms that might have been confused with domain-specific ones
+
+Transcript:
+{transcript}
+
+Provide the corrected transcript, maintaining all original formatting and structure."""
+        
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": self.config.openrouter_processing_model,
+                "messages": [{
+                    "role": "user",
+                    "content": prompt
+                }]
+            }
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+
+    def _transcribe_audio(self, audio_path: str, title: str, progress_callback=None) -> str:
+        """Transcribe audio file using whisper with configured options and process with domain expertise."""
         self._load_whisper()
-        result = self.whisper_model.transcribe(audio_path)
-        return result["text"]
+        
+        # Prepare transcription options
+        options = {
+            'verbose': False,  # We'll handle our own progress
+            'progress_callback': lambda progress: progress_callback({
+                'stage': 'transcribing_progress',
+                'progress': progress
+            }) if progress_callback else None
+        }
+        if self.config.whisper_language:
+            options['language'] = self.config.whisper_language
+        
+        # Get initial transcript from Whisper
+        result = self.whisper_model.transcribe(audio_path, **options)
+        initial_transcript = result["text"]
+        
+        # Take a sample for topic detection
+        sample_size = min(len(initial_transcript), self.config.topic_sample_size)
+        transcript_sample = initial_transcript[:sample_size]
+        
+        # Detect the domain/topic
+        domain = self._detect_topic(title, transcript_sample)
+        
+        # Correct the transcript using domain expertise
+        corrected_transcript = self._correct_transcript(initial_transcript, domain)
+        
+        return corrected_transcript
     
     def _generate_embedding(self, text: str) -> List[float]:
         """Generate vector embedding for text."""
@@ -109,11 +220,42 @@ class PodcastProcessor:
         with md_file.open('w') as f:
             f.write(note_content)
     
-    def ingest_subscriptions(self):
-        """Ingest all Apple Podcast subscriptions and new episodes."""
+    def ingest_subscriptions(self, lookback_days: int = 7, progress_callback=None):
+        """Ingest all Apple Podcast subscriptions and new episodes.
+        
+        Args:
+            lookback_days: Only process episodes published within this many days (default: 7)
+            progress_callback: Optional callback for progress updates, receives dict with:
+                - stage: str ('podcast' or 'episode')
+                - podcast: dict with podcast info
+                - current: int (current count)
+                - total: int (total count)
+                - episode: dict with episode info (if stage == 'episode')
+        """
+        from datetime import datetime, timedelta
+        cutoff_date = datetime.now() - timedelta(days=lookback_days)
         subscriptions = get_subscriptions()
         
-        for sub in subscriptions:
+        # Initial stats
+        if progress_callback:
+            progress_callback({
+                'stage': 'init',
+                'total_podcasts': len(subscriptions)
+            })
+        
+        # Filter out ignored podcasts
+        subscriptions = [s for s in subscriptions if s['title'] not in self.config.ignore_podcasts]
+        
+        for podcast_idx, sub in enumerate(subscriptions, 1):
+            # Progress update for podcast
+            if progress_callback:
+                progress_callback({
+                    'stage': 'podcast',
+                    'podcast': sub,
+                    'current': podcast_idx,
+                    'total': len(subscriptions)
+                })
+            
             # Add or update podcast
             podcast = self.db.query(Podcast).filter_by(feed_url=sub['feed_url']).first()
             if not podcast:
@@ -127,11 +269,35 @@ class PodcastProcessor:
             
             # Parse feed
             feed = feedparser.parse(sub['feed_url'])
+            recent_entries = []
             
+            # First pass: collect recent entries
             for entry in feed.entries:
+                # Parse published date
+                published_at = datetime(*entry.published_parsed[:6]) if 'published_parsed' in entry else None
+                if published_at and published_at >= cutoff_date:
+                    recent_entries.append((entry, published_at))
+            
+            # Progress update for episodes
+            if progress_callback and recent_entries:
+                progress_callback({
+                    'stage': 'episodes_found',
+                    'podcast': sub,
+                    'total': len(recent_entries)
+                })
+            
+            # Process recent entries
+            for entry_idx, (entry, published_at) in enumerate(recent_entries, 1):
                 # Check if episode exists
                 guid = entry.get('id', entry.get('link'))
                 if not guid:
+                    continue
+                    
+                # Parse published date
+                published_at = datetime(*entry.published_parsed[:6]) if 'published_parsed' in entry else None
+                
+                # Skip if too old or already exists
+                if not published_at or published_at < cutoff_date:
                     continue
                     
                 existing = self.db.query(Episode).filter_by(guid=guid).first()
@@ -148,29 +314,92 @@ class PodcastProcessor:
                 if not audio_url:
                     continue
                 
+                # Extract episode metadata safely
+                episode_title = entry.get('title')
+                if not episode_title:
+                    if progress_callback:
+                        progress_callback({
+                            'stage': 'error',
+                            'podcast': sub,
+                            'episode': {'title': 'Unknown'},
+                            'error': 'Episode missing title'
+                        })
+                    continue
+                
                 # Create new episode
                 episode = Episode(
                     podcast_id=podcast.id,
                     guid=guid,
-                    title=entry.get('title', 'Untitled Episode'),
+                    title=episode_title,
                     description=entry.get('description', ''),
-                    published_at=datetime(*entry.published_parsed[:6]) if 'published_parsed' in entry else None,
+                    published_at=published_at,  # We already have this from earlier
                     audio_url=audio_url
                 )
                 
                 try:
-                    # Download and transcribe
-                    temp_path = self._download_audio(audio_url)
-                    episode.transcript = self._transcribe_audio(temp_path)
-                    episode.vector_embedding = json.dumps(self._generate_embedding(episode.transcript))
+                    if progress_callback:
+                        progress_callback({
+                            'stage': 'episode_start',
+                            'podcast': sub,
+                            'episode': {
+                                'title': episode.title,
+                                'published_at': published_at
+                            },
+                            'current': entry_idx,
+                            'total': len(recent_entries)
+                        })
+                    
+                    # Download audio
+                    if progress_callback:
+                        progress_callback({'stage': 'downloading', 'podcast': sub, 'episode': {'title': episode.title}})
+                    try:
+                        temp_path = self._download_audio(audio_url)
+                    except requests.exceptions.RequestException as e:
+                        raise Exception(f"Failed to download audio: {str(e)}")
+                    
+                    # Transcribe
+                    if progress_callback:
+                        progress_callback({'stage': 'transcribing', 'podcast': sub, 'episode': {'title': episode.title}})
+                    try:
+                        episode.transcript = self._transcribe_audio(temp_path, episode.title, progress_callback)
+                    except Exception as e:
+                        raise Exception(f"Failed to transcribe audio: {str(e)}")
+                    
+                    # Generate embedding
+                    if progress_callback:
+                        progress_callback({'stage': 'embedding', 'podcast': sub, 'episode': {'title': episode.title}})
+                    try:
+                        episode.vector_embedding = json.dumps(self._generate_embedding(episode.transcript))
+                    except Exception as e:
+                        raise Exception(f"Failed to generate embedding: {str(e)}")
                     
                     # Write to Obsidian if configured
-                    self._write_to_obsidian(episode)
+                    if progress_callback:
+                        progress_callback({'stage': 'exporting', 'podcast': sub, 'episode': {'title': episode.title}})
+                    try:
+                        self._write_to_obsidian(episode)
+                    except Exception as e:
+                        raise Exception(f"Failed to write to Obsidian: {str(e)}")
+                    
+                    # Report completion
+                    if progress_callback:
+                        progress_callback({
+                            'stage': 'episode_complete',
+                            'podcast': sub,
+                            'episode': {'title': episode.title}
+                        })
                     
                     # Cleanup
                     os.unlink(temp_path)
                 except Exception as e:
                     print(f"Error processing episode {episode.title}: {e}")
+                    if progress_callback:
+                        progress_callback({
+                            'stage': 'error',
+                            'podcast': sub,
+                            'episode': {'title': episode.title},
+                            'error': str(e)
+                        })
                     continue
                 
                 self.db.add(episode)

@@ -4,14 +4,24 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
 
 ## Features
 
-- **Apple Podcast Integration**: Automatically extracts and processes your Apple Podcast subscriptions
-- **RSS Feed Processing**: Retrieves and parses podcast RSS feeds to discover new episodes
+- **Apple Podcast Integration**: 
+  - Automatically extracts and processes your Apple Podcast subscriptions
+  - Smart episode filtering with configurable lookback period
+  - Easy subscription management and episode listing
+- **RSS Feed Processing**: 
+  - Retrieves and parses podcast RSS feeds to discover new episodes
+  - Defaults to processing only recent episodes (last 7 days)
+  - Configurable lookback period for older episodes
 - **Smart Storage**:
   - SQLite3 database for episode metadata and full transcripts
   - Vector embeddings for efficient semantic search
   - Configurable Obsidian markdown export
 - **Efficient Processing**: Downloads and transcribes episodes, then discards audio to save space
-- **Transcription**: Leverages local Whisper installation for high-quality audio transcription
+- **Smart Transcription Pipeline**:
+  - Initial transcription using OpenAI's Whisper
+  - Automatic domain detection (e.g., Brazilian Jiu-Jitsu, Quantum Physics)
+  - Domain-aware transcript correction for technical terms and jargon
+  - High-quality output optimized for each podcast's subject matter
 - **AI-Powered Analysis**: Uses OpenRouter to generate customized summaries and insights
 - **Semantic Search**: Command-line interface for searching through podcast history using natural language
 - **Obsidian Integration**: Generates markdown notes with customizable templates
@@ -24,11 +34,17 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
 git clone https://github.com/pedramamini/podsidian.git
 cd podsidian
 
-# Install using uv (recommended)
+# Create and activate virtual environment using uv
+uv venv
+source .venv/bin/activate
+
+# Install dependencies
 uv pip install hatch
 uv pip install -e .
 
-# Or using pip
+# Or if you prefer using regular pip
+python -m venv .venv
+source .venv/bin/activate
 pip install hatch
 pip install -e .
 ```
@@ -83,11 +99,23 @@ Available variable: {transcript}"""
 # Initialize configuration
 podsidian init
 
-# Process new episodes
+# Show current configuration
+podsidian show-config
+
+# List all podcast subscriptions
+podsidian subscriptions
+
+# List all downloaded episodes
+podsidian episodes
+
+# Process new episodes (last 7 days by default)
 podsidian ingest
 
+# Process episodes from last 30 days
+podsidian ingest --lookback 30
+
 # Export a specific episode transcript
-podsidian export --transcript <episode_id>
+podsidian export <episode_id>
 
 # Search through podcast history
 podsidian search "blockchain security"
@@ -136,10 +164,96 @@ GET  /episodes/:id    # Get episode details and transcript
 ## Requirements
 
 - Python 3.9+
-- Local Whisper installation
 - OpenRouter API access
 - Apple Podcasts subscriptions
 - Obsidian vault (optional)
+
+### Installing Whisper
+
+Whisper requires FFmpeg for audio processing. Install it first:
+
+```bash
+# On macOS using Homebrew
+brew install ffmpeg
+
+# On Ubuntu/Debian
+sudo apt update && sudo apt install ffmpeg
+```
+
+Whisper also requires PyTorch. For optimal performance with GPU support:
+
+```bash
+# For CUDA (NVIDIA GPU)
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# For CPU only or M1/M2 Macs
+uv pip install torch torchvision torchaudio
+```
+
+The main Whisper package will be installed automatically as a dependency of Podsidian. The first time you run transcription, it will download the model files (size varies by model choice).
+
+### Configuring Whisper
+
+Whisper can be configured in your `config.toml`:
+
+```toml
+[whisper]
+# Choose model size based on your needs
+model = "large-v3"  # Options: tiny, base, small, medium, large, large-v3
+
+# Optionally specify language (auto-detected if not set)
+language = "en"  # Use language codes like "en", "es", "fr", etc.
+
+# Performance settings
+cpu_only = false  # Set to true to force CPU usage
+threads = 4      # Number of CPU threads when using CPU
+```
+
+Model size trade-offs:
+- **tiny**: 1GB VRAM, fastest, least accurate
+- **base**: 1GB VRAM, good balance for most uses
+- **small**: 2GB VRAM, better accuracy
+- **medium**: 5GB VRAM, high accuracy
+- **large**: 10GB VRAM, very high accuracy
+- **large-v3**: 10GB VRAM, highest accuracy, improved performance (default)
+
+## Smart Transcript Processing
+
+Podsidian uses a sophisticated pipeline to ensure high-quality transcripts:
+
+1. **Initial Transcription**: Uses Whisper to convert audio to text
+2. **Domain Detection**: Analyzes a sample of the transcript to identify the podcast's domain (e.g., Brazilian Jiu-Jitsu, Quantum Physics, Constitutional Law)
+3. **Expert Correction**: Uses domain expertise to fix technical terms, jargon, and specialized vocabulary
+4. **Final Processing**: The corrected transcript is then summarized and stored
+
+This is particularly useful for:
+- Technical podcasts with specialized terminology
+- Academic discussions with field-specific jargon
+- Sports content with unique moves and techniques
+- Medical or scientific podcasts with complex terminology
+
+For example, in a Brazilian Jiu-Jitsu podcast, it will correctly handle terms like:
+- Gi, Omoplata, De La Riva, Berimbolo
+- Practitioner and technique names
+- Portuguese terminology
+
+Configure the processing in your `config.toml`:
+```toml
+[openrouter]
+# API key (required)
+api_key = "your-api-key"  # Or set PODSIDIAN_OPENROUTER_API_KEY env var
+
+# Model settings
+model = "openai/gpt-4"             # Model for summarization
+processing_model = "openai/gpt-4"  # Model for domain detection and corrections
+topic_sample_size = 16000          # Characters to analyze for domain detection
+```
+
+## Performance Tips
+1. Use GPU if available (default behavior)
+2. If using CPU, adjust `threads` based on your system
+3. Choose model size based on your available memory and accuracy needs
+4. Specify language if known for better accuracy
 
 ## Development
 
