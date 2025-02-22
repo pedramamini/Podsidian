@@ -28,7 +28,7 @@ template = """# {title}
 # - medium: 5GB VRAM, high accuracy
 # - large: 10GB VRAM, very high accuracy
 # - large-v3: 10GB VRAM, highest accuracy, improved performance
-model = "large-v3"
+model = "medium.en"
 
 # Language to use for transcription (optional)
 # If not specified, Whisper will auto-detect the language
@@ -49,14 +49,14 @@ threads = 4
 api_key = ""
 
 # Model to use for topic detection and transcript correction
-processing_model = "openai/gpt-4"
+processing_model = "openai/gpt-4o"
 
 # Sample size in characters for topic detection
 topic_sample_size = 4096
 
 # Model to use for summarization
 # See https://openrouter.ai/docs for available models
-model = "openai/gpt-4"
+model = "openai/gpt-4o"
 
 # Prompt template for processing transcripts
 # Available variables: {transcript}
