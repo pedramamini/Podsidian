@@ -140,6 +140,10 @@ Provide the corrected transcript, maintaining all original formatting and struct
         options = {}
         if self.config.whisper_language:
             options['language'] = self.config.whisper_language
+            
+        # Set number of threads for transcription
+        if hasattr(self.config, 'num_threads'):
+            options['num_threads'] = self.config.num_threads
 
         # Create a wrapper for tqdm that updates our progress
         if progress_callback:

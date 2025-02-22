@@ -35,6 +35,10 @@ model = "medium.en"
 # Example: "en" for English, "es" for Spanish, etc.
 language = ""
 
+# Number of CPU threads to use for transcription
+# For M4 Max, 8 threads provides good performance without overloading
+num_threads = 8
+
 # Use CPU instead of GPU for inference
 # Set to true if you don't have a GPU or encounter GPU memory issues
 cpu_only = false
