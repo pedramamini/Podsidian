@@ -1,0 +1,39 @@
+[project]
+name = "podsidian"
+version = "0.1.0"
+description = "Bridge between Apple Podcasts and Obsidian with AI-powered features"
+authors = [
+    {name = "Pedram Amini", email = "pedram@example.com"},
+]
+dependencies = [
+    "feedparser>=6.0.10",
+    "openai-whisper>=20231117",
+    "sqlalchemy>=2.0.25",
+    "click>=8.1.7",
+    "requests>=2.31.0",
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    "python-dotenv>=1.0.0",
+    "sentence-transformers>=2.2.2",
+    "sqlite-utils>=3.35.2",
+    "obsidian-py>=0.2.1",
+]
+requires-python = ">=3.9"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+podsidian = "podsidian.cli:cli"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+]

@@ -1,0 +1,39 @@
+# Podsidian Configuration
+
+[obsidian]
+# Path to your Obsidian vault
+vault_path = "~/Documents/Obsidian"
+
+# Template for generated notes
+# Available variables: {title}, {podcast_title}, {published_at}, {audio_url}, {summary}, {transcript}
+template = """# {title}
+
+## Metadata
+- **Podcast**: {podcast_title}
+- **Published**: {published_at}
+- **URL**: {audio_url}
+
+## Summary
+{summary}
+"""
+
+[openrouter]
+# OpenRouter API configuration
+# API key can also be set via PODSIDIAN_OPENROUTER_API_KEY environment variable
+api_key = ""
+
+# Model to use for summarization
+# See https://openrouter.ai/docs for available models
+model = "anthropic/claude-2"
+
+# Prompt template for processing transcripts
+# Available variables: {transcript}
+prompt = """You are a helpful podcast summarizer.
+Given the following podcast transcript, provide:
+1. A concise 2-3 paragraph summary of the key points
+2. A bullet list of the most important takeaways
+3. Any notable quotes, properly attributed
+
+Transcript:
+{transcript}
+"""
