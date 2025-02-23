@@ -23,7 +23,10 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
   - Domain-aware transcript correction for technical terms and jargon
   - High-quality output optimized for each podcast's subject matter
 - **AI-Powered Analysis**: Uses OpenRouter to generate customized summaries and insights
-- **Semantic Search**: Command-line interface for searching through podcast history using natural language
+- **Advanced Search Capabilities**: 
+  - Semantic search using natural language queries with configurable relevance thresholds
+  - Keyword search for exact text matches in transcripts
+  - Default relevance threshold of 60 for high-quality matches
 - **Obsidian Integration**: Generates markdown notes with customizable templates
 - **AI Agent Integration**: Exposes an MCP (Message Control Program) service for AI agents
 
@@ -111,14 +114,23 @@ podsidian episodes
 # Process new episodes (last 7 days by default)
 podsidian ingest
 
-# Process episodes from last 30 days
-podsidian ingest --lookback 30
+# Process episodes from last 30 days with debug output
+podsidian ingest --lookback 30 --debug
+
+# Process episodes with detailed debug information
+podsidian ingest --debug
 
 # Export a specific episode transcript
 podsidian export <episode_id>
 
-# Search through podcast history
-podsidian search "blockchain security"
+# Search through podcast history (semantic search)
+podsidian search semantic "blockchain security"
+
+# Search with custom relevance threshold (0-100)
+podsidian search semantic "blockchain security" --relevance 75
+
+# Search for exact keyword matches
+podsidian search keyword "blockchain"
 
 # Start the MCP service
 podsidian mcp --port 8080
@@ -156,9 +168,10 @@ RESTful API for AI agent integration:
 http://localhost:8080/api/v1
 
 # Endpoints
-GET  /search          # Semantic search across transcripts
-GET  /episodes        # List all processed episodes
-GET  /episodes/:id    # Get episode details and transcript
+GET  /search/semantic  # Semantic search across transcripts
+GET  /search/keyword   # Keyword search in transcripts
+GET  /episodes         # List all processed episodes
+GET  /episodes/:id     # Get episode details and transcript
 ```
 
 ## Requirements
@@ -247,6 +260,16 @@ api_key = "your-api-key"  # Or set PODSIDIAN_OPENROUTER_API_KEY env var
 model = "openai/gpt-4"             # Model for summarization
 processing_model = "openai/gpt-4"  # Model for domain detection and corrections
 topic_sample_size = 16000          # Characters to analyze for domain detection
+
+[search]
+# Default relevance threshold for semantic search (0-100)
+default_relevance = 60
+
+# Override relevance thresholds for specific queries
+relevance_overrides = [
+  { query = "technical details", threshold = 75 },
+  { query = "general discussion", threshold = 40 }
+]
 ```
 
 ## Performance Tips

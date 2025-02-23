@@ -11,10 +11,34 @@ app = FastAPI(title="Podsidian MCP API")
 def create_api(db_session: Session):
     processor = PodcastProcessor(db_session)
     
-    @app.get("/api/v1/search")
-    def search(query: str, limit: int = 10) -> List[Dict]:
-        """Search through podcast transcripts."""
-        return processor.search(query, limit)
+    @app.get("/api/v1/search/semantic")
+    def semantic_search(query: str, limit: int = 10, relevance: int = 25) -> List[Dict]:
+        """Search through podcast transcripts using semantic similarity.
+        
+        Args:
+            query: Search query string
+            limit: Maximum number of results to return
+            relevance: Minimum relevance score (0-100) for results
+        """
+        # Convert relevance to 0-1 scale
+        relevance_float = relevance / 100.0
+        results = processor.search(query, limit=limit, relevance_threshold=relevance_float)
+        
+        # Convert similarities to percentages
+        for result in results:
+            result['similarity'] = int(result['similarity'] * 100)
+            
+        return results
+        
+    @app.get("/api/v1/search/keyword")
+    def keyword_search(keyword: str, limit: int = 10) -> List[Dict]:
+        """Search through podcast transcripts for exact keyword matches.
+        
+        Args:
+            keyword: Exact text to search for (case-insensitive)
+            limit: Maximum number of results to return
+        """
+        return processor.keyword_search(keyword, limit=limit)
     
     @app.get("/api/v1/episodes")
     def list_episodes(limit: int = 100, offset: int = 0) -> List[Dict]:

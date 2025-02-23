@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import tempfile
 import feedparser
 import whisper
@@ -32,6 +33,13 @@ class PodcastProcessor:
         if not self.whisper_model:
             import torch
             import warnings
+            import whisper
+
+            if hasattr(self, '_progress_callback') and self._debug:
+                self._progress_callback({
+                    'stage': 'debug',
+                    'message': f'Loading Whisper model: {self.config.whisper_model}'
+                })
 
             # Suppress FP16 warning on CPU
             warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
@@ -41,13 +49,29 @@ class PodcastProcessor:
                 device = "cpu"
                 if self.config.whisper_threads > 0:
                     torch.set_num_threads(self.config.whisper_threads)
+                    if hasattr(self, '_progress_callback') and self._debug:
+                        self._progress_callback({
+                            'stage': 'debug',
+                            'message': f'Set torch threads to {self.config.whisper_threads}'
+                        })
             else:
                 device = "cuda" if torch.cuda.is_available() else "cpu"
+                if hasattr(self, '_progress_callback') and self._debug:
+                    self._progress_callback({
+                        'stage': 'debug',
+                        'message': f'Using device: {device}'
+                    })
 
             self.whisper_model = whisper.load_model(
                 self.config.whisper_model,
                 device=device
             )
+            
+            if hasattr(self, '_progress_callback') and self._debug:
+                self._progress_callback({
+                    'stage': 'debug',
+                    'message': 'Whisper model loaded successfully'
+                })
 
     def _load_embedding_model(self):
         """Lazy load sentence transformer model."""
@@ -132,8 +156,12 @@ Provide the corrected transcript, maintaining all original formatting and struct
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"].strip()
 
-    def _transcribe_audio(self, audio_path: str, title: str, progress_callback=None) -> str:
+    def _transcribe_audio(self, audio_path: str, title: str, progress_callback=None, debug: bool = False) -> str:
         """Transcribe audio file using whisper with configured options and process with domain expertise."""
+        # Store progress callback and debug flag for use in _load_whisper
+        self._progress_callback = progress_callback
+        self._debug = debug
+        
         self._load_whisper()
 
         # Prepare transcription options
@@ -144,30 +172,75 @@ Provide the corrected transcript, maintaining all original formatting and struct
         # Set number of threads for transcription
         if hasattr(self.config, 'num_threads'):
             options['num_threads'] = self.config.num_threads
+            
+        if debug and progress_callback:
+            progress_callback({
+                'stage': 'debug',
+                'message': f'Transcription options: {options}'
+            })
 
         # Create a wrapper for tqdm that updates our progress
         if progress_callback:
             from tqdm import tqdm
             original_tqdm = tqdm.__init__
+            last_update_time = [time.time()]
 
             def custom_tqdm_init(self, *args, **kwargs):
                 original_tqdm(self, *args, **kwargs)
                 self.progress_callback = progress_callback
                 self._original_update = self.update
+                self._start_time = time.time()
 
                 def custom_update(n=1):
-                    self._original_update(n)
-                    self.progress_callback({
-                        'stage': 'transcribing_progress',
-                        'progress': self.n / self.total if self.total else 0
-                    })
+                    current_time = time.time()
+                    if current_time - last_update_time[0] >= 0.5:
+                        self._original_update(n)
+                        progress_info = {
+                            'stage': 'transcribing_progress',
+                            'progress': self.n / self.total if self.total else 0
+                        }
+                        
+                        if debug:
+                            elapsed = current_time - self._start_time
+                            rate = self.n / elapsed if elapsed > 0 else 0
+                            eta = (self.total - self.n) / rate if rate > 0 else 0
+                            progress_info['debug'] = (
+                                f'frames={self.n}/{self.total} | '
+                                f'rate={rate:.1f} frames/s | '
+                                f'elapsed={elapsed:.1f}s | '
+                                f'eta={eta:.1f}s'
+                            )
+                            
+                        self.progress_callback(progress_info)
+                        last_update_time[0] = current_time
 
                 self.update = custom_update
 
             tqdm.__init__ = custom_tqdm_init
 
-        # Get initial transcript from Whisper
-        result = self.whisper_model.transcribe(audio_path, **options)
+        try:
+            if debug and progress_callback:
+                progress_callback({
+                    'stage': 'debug',
+                    'message': f'Starting transcription of {os.path.basename(audio_path)}'
+                })
+                
+            # Get initial transcript from Whisper
+            result = self.whisper_model.transcribe(audio_path, **options)
+            
+            if debug and progress_callback:
+                progress_callback({
+                    'stage': 'debug',
+                    'message': f'Transcription completed, text length: {len(result["text"])} chars'
+                })
+        except Exception as e:
+            if debug and progress_callback:
+                import traceback
+                progress_callback({
+                    'stage': 'debug',
+                    'message': f'Transcription error: {str(e)}\n{traceback.format_exc()}'
+                })
+            raise
 
         # Restore original tqdm if we modified it
         if progress_callback:
@@ -268,7 +341,7 @@ Provide the corrected transcript, maintaining all original formatting and struct
         with md_file.open('w') as f:
             f.write(note_content)
 
-    def ingest_subscriptions(self, lookback_days: int = 7, progress_callback=None):
+    def ingest_subscriptions(self, lookback_days: int = 7, progress_callback=None, debug: bool = False):
         """Ingest all Apple Podcast subscriptions and new episodes.
 
         Args:
@@ -438,7 +511,7 @@ Provide the corrected transcript, maintaining all original formatting and struct
                     if progress_callback:
                         progress_callback({'stage': 'transcribing', 'podcast': sub, 'episode': {'title': episode.title}})
                     try:
-                        episode.transcript = self._transcribe_audio(temp_path, episode.title, progress_callback)
+                        episode.transcript = self._transcribe_audio(temp_path, episode.title, progress_callback, debug=debug)
                     except Exception as e:
                         raise Exception(f"Failed to transcribe audio: {str(e)}")
 
@@ -482,8 +555,71 @@ Provide the corrected transcript, maintaining all original formatting and struct
                 self.db.add(episode)
                 self.db.commit()
 
-    def search(self, query: str, limit: int = 10) -> List[Dict]:
-        """Search through podcast transcripts using vector similarity."""
+    def _find_keyword_excerpt(self, keyword: str, transcript: str, context_chars: int = 100) -> str:
+        """Find an excerpt of text containing the keyword with surrounding context."""
+        keyword_lower = keyword.lower()
+        transcript_lower = transcript.lower()
+        
+        # Find the position of the keyword
+        pos = transcript_lower.find(keyword_lower)
+        if pos == -1:
+            return ""
+            
+        # Get surrounding context
+        start = max(0, pos - context_chars)
+        end = min(len(transcript), pos + len(keyword) + context_chars)
+        
+        # Add ellipsis if we truncated the text
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if end < len(transcript) else ""
+        
+        # Get the excerpt with original casing
+        excerpt = transcript[start:end]
+        
+        return prefix + excerpt + suffix
+        
+    def keyword_search(self, keyword: str, limit: int = 10) -> List[Dict]:
+        """Search through podcast transcripts for exact keyword matches.
+        
+        Args:
+            keyword: Exact text to search for (case-insensitive)
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of dicts containing episodes with matching transcripts
+        """
+        results = []
+        keyword_lower = keyword.lower()
+        
+        # Search through all episodes with transcripts
+        for episode in self.db.query(Episode).filter(Episode.transcript.isnot(None)):
+            if keyword_lower in episode.transcript.lower():
+                # Find a relevant excerpt containing the keyword
+                excerpt = self._find_keyword_excerpt(keyword, episode.transcript)
+                
+                results.append({
+                    'podcast': episode.podcast.title,
+                    'episode': episode.title,
+                    'published_at': episode.published_at,
+                    'excerpt': excerpt
+                })
+                
+                if len(results) >= limit:
+                    break
+                    
+        return results
+        
+    def search(self, query: str, limit: int = 10, relevance_threshold: float = 0.60) -> List[Dict]:
+        """Search through podcast transcripts using vector similarity.
+        
+        Args:
+            query: Search query string
+            limit: Maximum number of results to return
+            relevance_threshold: Minimum similarity score (0.0 to 1.0) for results
+            
+        Returns:
+            List of dicts containing search results above the relevance threshold
+        """
         self._load_embedding_model()
         query_embedding = self._generate_embedding(query)
 
@@ -493,10 +629,17 @@ Provide the corrected transcript, maintaining all original formatting and struct
             episode_embedding = json.loads(episode.vector_embedding)
             # Compute cosine similarity
             similarity = sum(a * b for a, b in zip(query_embedding, episode_embedding))
-            results.append({
-                'episode': episode,
-                'similarity': similarity
-            })
+            
+            # Only include results above threshold
+            if similarity >= relevance_threshold:
+                # Find a relevant excerpt
+                excerpt = self._find_keyword_excerpt(query, episode.transcript)
+                
+                results.append({
+                    'episode': episode,
+                    'similarity': similarity,
+                    'excerpt': excerpt
+                })
 
         # Sort by similarity and return top results
         results.sort(key=lambda x: x['similarity'], reverse=True)
