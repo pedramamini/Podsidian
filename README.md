@@ -105,8 +105,10 @@ podsidian init
 # Show current configuration
 podsidian show-config
 
-# List all podcast subscriptions
-podsidian subscriptions
+# Manage podcast subscriptions
+podsidian subscriptions list    # List all subscriptions and their mute state
+podsidian subscriptions mute "Podcast Title"    # Mute a podcast (skip during ingestion)
+podsidian subscriptions unmute "Podcast Title"  # Unmute a podcast
 
 # List all downloaded episodes
 podsidian episodes
@@ -168,10 +170,13 @@ RESTful API for AI agent integration:
 http://localhost:8080/api/v1
 
 # Endpoints
-GET  /search/semantic  # Semantic search across transcripts
-GET  /search/keyword   # Keyword search in transcripts
-GET  /episodes         # List all processed episodes
-GET  /episodes/:id     # Get episode details and transcript
+GET  /search/semantic                    # Semantic search across transcripts
+GET  /search/keyword                     # Keyword search in transcripts
+GET  /episodes                           # List all processed episodes
+GET  /episodes/:id                       # Get episode details and transcript
+GET  /subscriptions                      # List all subscriptions with mute state
+POST /subscriptions/:title/mute          # Mute a podcast subscription
+POST /subscriptions/:title/unmute        # Unmute a podcast subscription
 ```
 
 ## Requirements

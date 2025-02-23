@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, create_engine
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, create_engine, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
@@ -12,6 +12,7 @@ class Podcast(Base):
     title = Column(String(255), nullable=False)
     author = Column(String(255))
     feed_url = Column(String(512), unique=True, nullable=False)
+    muted = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

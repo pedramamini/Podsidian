@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 from datetime import datetime
 
-from .models import Episode
+from .models import Episode, Podcast
 from .core import PodcastProcessor
+from .apple_podcasts import get_subscriptions
 
 app = FastAPI(title="Podsidian MCP API")
 
@@ -70,6 +71,65 @@ def create_api(db_session: Session):
             'description': episode.description,
             'published_at': episode.published_at,
             'transcript': episode.transcript
+        }
+    
+    @app.get("/api/v1/subscriptions")
+    def list_subscriptions() -> List[Dict]:
+        """List all podcast subscriptions with their mute state."""
+        # Get subscriptions from Apple Podcasts
+        subs = get_subscriptions()
+        if not subs:
+            return []
+        
+        # Ensure all podcasts exist in database
+        for sub in subs:
+            podcast = db_session.query(Podcast).filter_by(feed_url=sub['feed_url']).first()
+            if not podcast:
+                podcast = Podcast(
+                    title=sub['title'],
+                    author=sub['author'],
+                    feed_url=sub['feed_url'],
+                    muted=False
+                )
+                db_session.add(podcast)
+        db_session.commit()
+        
+        # Get mute states from database
+        muted_feeds = {p.feed_url: p.muted for p in db_session.query(Podcast).all()}
+        
+        return [{
+            'title': sub['title'],
+            'author': sub['author'],
+            'feed_url': sub['feed_url'],
+            'muted': muted_feeds.get(sub['feed_url'], False)
+        } for sub in sorted(subs, key=lambda x: x['title'])]
+    
+    @app.post("/api/v1/subscriptions/{title}/mute")
+    def mute_subscription(title: str) -> Dict:
+        """Mute a podcast subscription by title."""
+        podcast = db_session.query(Podcast).filter(Podcast.title.ilike(f"%{title}%")).first()
+        if not podcast:
+            raise HTTPException(status_code=404, detail=f"No podcast found matching title: {title}")
+        
+        podcast.muted = True
+        db_session.commit()
+        return {
+            'title': podcast.title,
+            'muted': True
+        }
+    
+    @app.post("/api/v1/subscriptions/{title}/unmute")
+    def unmute_subscription(title: str) -> Dict:
+        """Unmute a podcast subscription by title."""
+        podcast = db_session.query(Podcast).filter(Podcast.title.ilike(f"%{title}%")).first()
+        if not podcast:
+            raise HTTPException(status_code=404, detail=f"No podcast found matching title: {title}")
+        
+        podcast.muted = False
+        db_session.commit()
+        return {
+            'title': podcast.title,
+            'muted': False
         }
     
     return app

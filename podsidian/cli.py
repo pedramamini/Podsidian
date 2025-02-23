@@ -46,21 +46,103 @@ def init():
     click.echo(f"Created configuration file at: {config.config_path}")
     click.echo("Please edit this file to configure your OpenRouter API key and preferences.")
 
-@cli.command()
+@cli.group()
 def subscriptions():
+    """Manage Apple Podcasts subscriptions."""
+    pass
+
+@subscriptions.command(name='list')
+def list_subscriptions():
     """List all Apple Podcasts subscriptions."""
     from .apple_podcasts import get_subscriptions
-    subs = get_subscriptions()
+    from .models import Podcast
+    session = get_db_session()
     
+    # Get subscriptions from Apple Podcasts
+    subs = get_subscriptions()
     if not subs:
         click.echo("No Apple Podcasts subscriptions found.")
         return
     
-    click.echo("\nApple Podcasts Subscriptions:")
-    click.echo("-" * 30)
+    # Ensure all podcasts exist in database
+    for sub in subs:
+        podcast = session.query(Podcast).filter_by(feed_url=sub['feed_url']).first()
+        if not podcast:
+            podcast = Podcast(
+                title=sub['title'],
+                author=sub['author'],
+                feed_url=sub['feed_url'],
+                muted=False
+            )
+            session.add(podcast)
+    session.commit()
+    
+    # Get mute states from database
+    muted_feeds = {p.feed_url: p.muted for p in session.query(Podcast).all()}
+    
+    # Split into muted and unmuted lists
+    muted_subs = []
+    unmuted_subs = []
     for sub in sorted(subs, key=lambda x: x['title']):
-        click.echo(f"• {sub['title']}")
+        if muted_feeds.get(sub['feed_url'], False):
+            muted_subs.append(sub)
+        else:
+            unmuted_subs.append(sub)
+    
+    # Show active subscriptions
+    click.echo("\nActive Subscriptions:")
+    click.echo("-" * 30)
+    if unmuted_subs:
+        for sub in unmuted_subs:
+            click.echo(f"• {sub['title']}")
+    else:
+        click.echo("No active subscriptions")
+    
+    # Show muted subscriptions
+    click.echo("\nMuted Subscriptions:")
+    click.echo("-" * 30)
+    if muted_subs:
+        for sub in muted_subs:
+            click.echo(f"• {sub['title']}")
+    else:
+        click.echo("No muted subscriptions")
     click.echo()
+
+@subscriptions.command()
+@click.argument('title')
+def mute(title):
+    """Mute a podcast subscription by title.
+    
+    The podcast will not be ingested until unmuted.
+    """
+    session = get_db_session()
+    podcast = session.query(Podcast).filter(Podcast.title.ilike(f"%{title}%")).first()
+    
+    if not podcast:
+        click.echo(f"No podcast found matching title: {title}")
+        return
+    
+    podcast.muted = True
+    session.commit()
+    click.echo(f"Muted podcast: {podcast.title}")
+
+@subscriptions.command()
+@click.argument('title')
+def unmute(title):
+    """Unmute a podcast subscription by title.
+    
+    The podcast will be included in future ingests.
+    """
+    session = get_db_session()
+    podcast = session.query(Podcast).filter(Podcast.title.ilike(f"%{title}%")).first()
+    
+    if not podcast:
+        click.echo(f"No podcast found matching title: {title}")
+        return
+    
+    podcast.muted = False
+    session.commit()
+    click.echo(f"Unmuted podcast: {podcast.title}")
 
 @cli.command()
 def episodes():

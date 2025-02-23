@@ -385,10 +385,20 @@ Provide the corrected transcript, maintaining all original formatting and struct
                         podcast = Podcast(
                             title=sub['title'],
                             author=sub['author'],
-                            feed_url=sub['feed_url']
+                            feed_url=sub['feed_url'],
+                            muted=False
                         )
                         self.db.add(podcast)
                         self.db.commit()
+                    
+                    # Skip muted podcasts
+                    if podcast.muted:
+                        if progress_callback:
+                            progress_callback({
+                                'stage': 'skip',
+                                'message': f"Skipping muted podcast: {podcast.title}"
+                            })
+                        continue
 
                     # Verify podcast was created successfully
                     podcast = self.db.query(Podcast).filter_by(feed_url=sub['feed_url']).first()
