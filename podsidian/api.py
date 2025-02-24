@@ -55,12 +55,26 @@ app = FastAPI(
 def create_api(db_session: Session):
     processor = PodcastProcessor(db_session)
     
+    @app.post("/initialize")
+    async def initialize() -> Dict:
+        """Initialize connection with MCP server.
+        
+        This endpoint is called by Goose when establishing a connection.
+        """
+        return {
+            "serverInfo": {
+                "name": "Podsidian MCP",
+                "version": "1.0.0",
+                "capabilities": ["search", "transcribe", "summarize"]
+            }
+        }
+    
     @app.get("/", tags=["discovery"])
     def get_capabilities() -> Dict:
         """Get server capabilities and available endpoints.
         
-        This is the root endpoint that MCP clients use to discover
-        what functionality is available from the server.
+        This endpoint provides detailed information about available
+        functionality and how to use each endpoint.
         
         Returns:
             Dictionary of server capabilities and endpoints
