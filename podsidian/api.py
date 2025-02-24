@@ -45,6 +45,7 @@ app = FastAPI(
     """,
     version="1.0.0",
     openapi_tags=[
+        {"name": "discovery", "description": "Discover server capabilities"},
         {"name": "search", "description": "Search through podcast transcripts"},
         {"name": "episodes", "description": "Manage podcast episodes"},
         {"name": "subscriptions", "description": "Manage podcast subscriptions"}
@@ -53,6 +54,66 @@ app = FastAPI(
 
 def create_api(db_session: Session):
     processor = PodcastProcessor(db_session)
+    
+    @app.get("/", tags=["discovery"])
+    def get_capabilities() -> Dict:
+        """Get server capabilities and available endpoints.
+        
+        This is the root endpoint that MCP clients use to discover
+        what functionality is available from the server.
+        
+        Returns:
+            Dictionary of server capabilities and endpoints
+        """
+        return {
+            "name": "Podsidian MCP",
+            "version": "1.0.0",
+            "capabilities": {
+                "search": {
+                    "semantic": {
+                        "endpoint": "/api/v1/search/semantic",
+                        "description": "Search transcripts using natural language",
+                        "parameters": {
+                            "query": "Search query string",
+                            "limit": "Maximum results (default: 10)",
+                            "relevance": "Minimum score 0-100 (default: 25)"
+                        }
+                    },
+                    "keyword": {
+                        "endpoint": "/api/v1/search/keyword",
+                        "description": "Search transcripts for exact matches",
+                        "parameters": {
+                            "keyword": "Text to search for",
+                            "limit": "Maximum results (default: 10)"
+                        }
+                    }
+                },
+                "episodes": {
+                    "list": {
+                        "endpoint": "/api/v1/episodes",
+                        "description": "List processed episodes"
+                    },
+                    "get": {
+                        "endpoint": "/api/v1/episodes/{episode_id}",
+                        "description": "Get episode details and transcript"
+                    }
+                },
+                "subscriptions": {
+                    "list": {
+                        "endpoint": "/api/v1/subscriptions",
+                        "description": "List podcast subscriptions"
+                    },
+                    "mute": {
+                        "endpoint": "/api/v1/subscriptions/{title}/mute",
+                        "description": "Mute a podcast"
+                    },
+                    "unmute": {
+                        "endpoint": "/api/v1/subscriptions/{title}/unmute",
+                        "description": "Unmute a podcast"
+                    }
+                }
+            }
+        }
     
     @app.get("/api/v1/search/semantic", response_model=List[SearchResult], tags=["search"])
     def semantic_search(query: str, limit: int = 10, relevance: int = 25) -> List[Dict]:
