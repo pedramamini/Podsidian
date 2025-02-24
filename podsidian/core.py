@@ -280,7 +280,17 @@ CHANGES MADE:
         transcript_sample = initial_transcript[:sample_size]
 
         # Detect the domain/topic
+        if progress_callback:
+            progress_callback({
+                'stage': 'domain_detection',
+                'message': 'Detecting podcast domain for specialized transcript correction...'
+            })
         domain = self._detect_topic(title, transcript_sample)
+        if progress_callback:
+            progress_callback({
+                'stage': 'domain_detected',
+                'message': f'Detected domain: {domain}'
+            })
 
         # Correct the transcript using domain expertise
         corrected_transcript = self._correct_transcript(initial_transcript, domain)
@@ -511,14 +521,17 @@ CHANGES MADE:
                 # Create new episode
                 try:
                     episode = Episode(
-                        podcast=podcast,  # Set the relationship directly
-                        podcast_id=podcast.id,
                         guid=guid,
                         title=episode_title,
                         description=entry.get('description', ''),
                         published_at=published_at,  # We already have this from earlier
                         audio_url=audio_url
                     )
+                    
+                    # Add episode to session before setting relationships
+                    self.db.add(episode)
+                    episode.podcast = podcast
+                    episode.podcast_id = podcast.id
 
                     # Verify the relationship is set
                     if not episode.podcast or not episode.podcast.title:
