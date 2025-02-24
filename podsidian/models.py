@@ -31,6 +31,7 @@ class Episode(Base):
     transcript = Column(Text)
     vector_embedding = Column(Text)  # JSON string of vector embedding
     created_at = Column(DateTime, default=datetime.utcnow)
+    processed_at = Column(DateTime)  # When the episode was processed and written to Obsidian
     
     podcast = relationship("Podcast", back_populates="episodes")
 

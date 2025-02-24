@@ -140,7 +140,15 @@ Focus on:
 Transcript:
 {transcript}
 
-Provide the corrected transcript, maintaining all original formatting and structure."""
+Provide your response in the following format:
+
+CORRECTED TRANSCRIPT:
+[Your corrected transcript here, maintaining all original formatting and structure]
+
+CHANGES MADE:
+- List each significant correction you made
+- Include the original text and what you changed it to
+- If no changes were needed, state that"""
 
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -154,7 +162,26 @@ Provide the corrected transcript, maintaining all original formatting and struct
             }
         )
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
+        
+        # Parse response
+        content = response.json()["choices"][0]["message"]["content"].strip()
+        
+        # Split into transcript and changes
+        parts = content.split("\nCHANGES MADE:")
+        if len(parts) == 2:
+            corrected_transcript = parts[0].replace("CORRECTED TRANSCRIPT:\n", "").strip()
+            changes = parts[1].strip()
+        else:
+            corrected_transcript = content
+            changes = "No changes reported"
+            
+        if hasattr(self, '_progress_callback') and self._progress_callback:
+            self._progress_callback({
+                'stage': 'transcript_correction',
+                'message': f"Domain Expert: {domain}\nChanges Made:\n{changes}"
+            })
+            
+        return corrected_transcript
 
     def _transcribe_audio(self, audio_path: str, title: str, progress_callback=None, debug: bool = False) -> str:
         """Transcribe audio file using whisper with configured options and process with domain expertise."""
@@ -228,10 +255,10 @@ Provide the corrected transcript, maintaining all original formatting and struct
             # Get initial transcript from Whisper
             result = self.whisper_model.transcribe(audio_path, **options)
             
-            if debug and progress_callback:
+            if progress_callback:
                 progress_callback({
-                    'stage': 'debug',
-                    'message': f'Transcription completed, text length: {len(result["text"])} chars'
+                    'stage': 'transcription',
+                    'message': f'Raw transcript length: {len(result["text"])} chars'
                 })
         except Exception as e:
             if debug and progress_callback:
@@ -340,6 +367,10 @@ Provide the corrected transcript, maintaining all original formatting and struct
         md_file = vault_path / filename
         with md_file.open('w') as f:
             f.write(note_content)
+            
+        # Mark episode as processed
+        episode.processed_at = datetime.utcnow()
+        self.db.commit()
 
     def ingest_subscriptions(self, lookback_days: int = 7, progress_callback=None, debug: bool = False):
         """Ingest all Apple Podcast subscriptions and new episodes.
@@ -449,7 +480,11 @@ Provide the corrected transcript, maintaining all original formatting and struct
                 with self.db.no_autoflush:
                     existing = self.db.query(Episode).filter_by(guid=guid).first()
                     if existing:
-                        continue
+                        # If episode exists but hasn't been processed, process it
+                        if not existing.processed_at:
+                            episode = existing
+                        else:
+                            continue
 
                 # Find audio URL
                 audio_url = None
