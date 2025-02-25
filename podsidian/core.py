@@ -350,6 +350,33 @@ CHANGES MADE:
 
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
+        
+    def _get_value_analysis(self, transcript: str) -> str:
+        """Get value analysis using OpenRouter if enabled."""
+        if not self.config.value_prompt_enabled or not self.config.openrouter_api_key:
+            return ""
+
+        import requests
+
+        headers = {
+            "Authorization": f"Bearer {self.config.openrouter_api_key}",
+            "HTTP-Referer": "https://github.com/pedramamini/podsidian",
+        }
+
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": self.config.openrouter_model,
+                "messages": [{
+                    "role": "user",
+                    "content": self.config.value_prompt.format(transcript=transcript)
+                }]
+            }
+        )
+
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
 
     def _make_safe_filename(self, s: str) -> str:
         """Convert string to a safe filename."""
@@ -386,6 +413,9 @@ CHANGES MADE:
         # Get AI summary if available
         summary = self._get_summary(episode.transcript) if episode.transcript else ""
 
+        # Get value analysis if enabled
+        value_analysis = self._get_value_analysis(episode.transcript) if episode.transcript else ""
+        
         # Format note using template
         note_content = self.config.note_template.format(
             title=episode.title,
@@ -393,6 +423,7 @@ CHANGES MADE:
             published_at=episode.published_at.strftime('%Y-%m-%d') if episode.published_at else 'Unknown',
             audio_url=episode.audio_url,
             summary=summary,
+            value_analysis=value_analysis,
             transcript=episode.transcript or "Transcript not available"
         )
 
