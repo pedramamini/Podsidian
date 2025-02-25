@@ -138,11 +138,14 @@ podsidian ingest --debug
 # Export a specific episode transcript
 podsidian export <episode_id>
 
-# Search through podcast content using natural language
+# Search through podcast content using natural language (default 30% relevance)
 podsidian search "impact of blockchain on cybersecurity"
 
 # Search with custom relevance threshold (0-100)
 podsidian search "meditation techniques for beginners" --relevance 75
+
+# Force refresh of search index before searching
+podsidian search "blockchain" --refresh
 
 # Start the MCP service
 podsidian mcp --port 8080

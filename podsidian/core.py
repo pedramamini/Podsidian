@@ -737,8 +737,12 @@ CHANGES MADE:
         
     
         
-    def _init_annoy_index(self) -> None:
-        """Initialize or load the Annoy index."""
+    def _init_annoy_index(self, force_rebuild: bool = False) -> None:
+        """Initialize or load the Annoy index.
+        
+        Args:
+            force_rebuild: If True, rebuild the index from scratch using database contents
+        """
         # Get embedding dimension from model
         if self.embedding_model is None:
             self._load_embedding_model()
@@ -748,22 +752,22 @@ CHANGES MADE:
         # Create new index
         self.annoy_index = AnnoyIndex(embedding_dim, self.config.annoy_metric)
         
-        # Load existing index if it exists
+        # Load existing index if it exists and we're not forcing a rebuild
         index_path = self.config.annoy_index_path
-        if os.path.exists(index_path):
+        if os.path.exists(index_path) and not force_rebuild:
             self.annoy_index.load(index_path)
-            
-            # Rebuild episode map
-            self.episode_map = {}
-            for episode in self.db.query(Episode).filter(Episode.vector_embedding.isnot(None)):
-                idx = len(self.episode_map)
-                self.episode_map[idx] = episode.id
-                self.annoy_index.add_item(idx, np.array(json.loads(episode.vector_embedding)))
-            
-            # Rebuild index if needed
-            if len(self.episode_map) > self.annoy_index.get_n_items():
-                self.annoy_index.build(self.config.annoy_n_trees)
-                self.annoy_index.save(index_path)
+        
+        # Rebuild episode map and index
+        self.episode_map = {}
+        for episode in self.db.query(Episode).filter(Episode.vector_embedding.isnot(None)):
+            idx = len(self.episode_map)
+            self.episode_map[idx] = episode.id
+            self.annoy_index.add_item(idx, np.array(json.loads(episode.vector_embedding)))
+        
+        # Build and save index
+        if force_rebuild or len(self.episode_map) > self.annoy_index.get_n_items():
+            self.annoy_index.build(self.config.annoy_n_trees)
+            self.annoy_index.save(index_path)
     
     def search(self, query: str, limit: int = 10, relevance_threshold: float = 0.60) -> List[Dict]:
         """Search through podcast content using natural language understanding.

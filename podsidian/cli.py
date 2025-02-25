@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 
-from .models import init_db
+from .models import init_db, Podcast
 from .core import PodcastProcessor
 from .api import create_api
 from .backup import create_backup, list_backups, restore_backup, find_backup_by_date
@@ -37,8 +37,22 @@ def cli():
 def show_config():
     """Show current configuration and status."""
     from .config import config
-    from .models import Episode
+    from .models import Episode, Podcast
     session = get_db_session()
+    
+    def print_section(title, items, indent=0):
+        click.echo("\n" + " " * indent + click.style(f"[{title}]", fg='green', bold=True))
+        for key, value in items:
+            # Skip the template and prompt as they're too long
+            if key in ['template', 'prompt', 'value_prompt']:
+                value = '<configured>' if value else '<not configured>'
+            # Mask API key
+            elif key == 'api_key':
+                value = '***' + value[-4:] if value else '<not set>'
+            # Format lists nicely
+            elif isinstance(value, list):
+                value = '\n' + '\n'.join([' ' * (indent + 4) + '• ' + str(item) for item in value]) if value else '<none>'
+            click.echo(" " * (indent + 2) + click.style(f"{key}: ", fg='bright_black') + str(value))
     
     # Get Annoy index info
     annoy_path = config.annoy_index_path
@@ -55,9 +69,56 @@ def show_config():
     if annoy_exists:
         click.echo(f"  Size: {click.style(str(round(annoy_size / 1024 / 1024, 2)), fg='blue')} MB")
     
+    # Get podcast stats
+    total_podcasts = session.query(Podcast).count()
+    active_podcasts = session.query(Podcast).filter(Podcast.muted == False).count()
+    muted_podcasts = session.query(Podcast).filter(Podcast.muted == True).count()
+
+    click.echo("\nPodcast Statistics:")
+    click.echo(f"  Total Podcasts: {click.style(str(total_podcasts), fg='blue')}")
+    click.echo(f"  Active Podcasts: {click.style(str(active_podcasts), fg='blue')}")
+    click.echo(f"  Muted Podcasts: {click.style(str(muted_podcasts), fg='blue')}")
+
     click.echo("\nEpisode Statistics:")
     click.echo(f"  Total Episodes: {click.style(str(total_episodes), fg='blue')}")
     click.echo(f"  Episodes with Embeddings: {click.style(str(episodes_with_embeddings), fg='blue')}")
+
+    # Obsidian Settings
+    obsidian_items = [
+        ('vault_path', config.vault_path),
+        ('template', config.note_template)
+    ]
+    print_section('Obsidian', obsidian_items)
+    
+    # Whisper Settings
+    whisper_items = [
+        ('model', config.whisper_model),
+        ('language', config.whisper_language or '<auto>'),
+        ('cpu_only', config.whisper_cpu_only),
+        ('threads', config.whisper_threads)
+    ]
+    print_section('Whisper', whisper_items)
+    
+    # OpenRouter Settings
+    openrouter_items = [
+        ('api_key', config.openrouter_api_key),
+        ('model', config.openrouter_model),
+        ('processing_model', config.openrouter_processing_model),
+        ('topic_sample_size', config.topic_sample_size),
+        ('prompt', config.openrouter_prompt),
+        ('value_prompt_enabled', config.value_prompt_enabled),
+        ('value_prompt', config.value_prompt)
+    ]
+    print_section('OpenRouter', openrouter_items)
+    
+    # Database Settings
+    db_items = [
+        ('path', DEFAULT_DB_PATH),
+    ]
+    print_section('Database', db_items)
+    
+    click.echo("\n" + click.style("Config File: ", fg='bright_black') + config.config_path)
+    click.echo()
     
 @cli.command()
 def init():
@@ -292,8 +353,9 @@ def ingest(lookback, debug):
 
 @cli.command()
 @click.argument('query')
-@click.option('--relevance', type=int, default=25, help='Minimum relevance score (0-100) for results')
-def search(query, relevance):
+@click.option('--relevance', type=int, default=30, help='Minimum relevance score (0-100) for results')
+@click.option('--refresh', is_flag=True, help='Force refresh of the search index before searching')
+def search(query, relevance, refresh):
     """Search through podcast content using natural language.
     
     Uses AI to find relevant content even when exact words don't match.
@@ -311,6 +373,12 @@ def search(query, relevance):
     total_podcasts = session.query(Podcast).filter_by(muted=False).count()
     total_episodes = session.query(Episode).filter(Episode.vector_embedding.isnot(None)).count()
     click.echo(f"Searching through {click.style(str(total_podcasts), bold=True)} podcasts and {click.style(str(total_episodes), bold=True)} episodes...")
+    
+    # Force index refresh if requested
+    if refresh:
+        click.echo("Refreshing search index...")
+        processor._init_annoy_index(force_rebuild=True)
+        click.echo("Index refresh complete.")
     
     # Convert relevance to 0-1 scale
     relevance_float = relevance / 100.0
@@ -384,68 +452,7 @@ def mcp(port):
     app = create_api(session)
     uvicorn.run(app, host="0.0.0.0", port=port)
 
-@cli.command(name='show-config')
-def show_config():
-    """Display current configuration settings."""
-    def format_section(title, items, indent=0):
-        click.echo("\n" + " " * indent + click.style(f"[{title}]", fg='green', bold=True))
-        for key, value in items:
-            # Skip the template and prompt as they're too long
-            if key in ['template', 'prompt', 'value_prompt']:
-                value = '<configured>' if value else '<not configured>'
-            # Mask API key
-            elif key == 'api_key':
-                value = '***' + value[-4:] if value else '<not set>'
-            # Format lists nicely
-            elif isinstance(value, list):
-                value = '\n' + '\n'.join([' ' * (indent + 4) + '• ' + str(item) for item in value]) if value else '<none>'
-            click.echo(" " * (indent + 2) + click.style(f"{key}: ", fg='bright_black') + str(value))
-    
-    click.echo(click.style("\nPodsidian Configuration", fg='blue', bold=True))
-    click.echo(click.style("=" * 21, fg='blue'))
-    
-    # Podcasts Settings
-    podcasts_items = [
-        ('ignore', config.ignore_podcasts)
-    ]
-    format_section('Podcasts', podcasts_items)
-    
-    # Obsidian Settings
-    obsidian_items = [
-        ('vault_path', config.vault_path),
-        ('template', config.note_template)
-    ]
-    format_section('Obsidian', obsidian_items)
-    
-    # Whisper Settings
-    whisper_items = [
-        ('model', config.whisper_model),
-        ('language', config.whisper_language or '<auto>'),
-        ('cpu_only', config.whisper_cpu_only),
-        ('threads', config.whisper_threads)
-    ]
-    format_section('Whisper', whisper_items)
-    
-    # OpenRouter Settings
-    openrouter_items = [
-        ('api_key', config.openrouter_api_key),
-        ('model', config.openrouter_model),
-        ('processing_model', config.openrouter_processing_model),
-        ('topic_sample_size', config.topic_sample_size),
-        ('prompt', config.openrouter_prompt),
-        ('value_prompt_enabled', config.value_prompt_enabled),
-        ('value_prompt', config.value_prompt)
-    ]
-    format_section('OpenRouter', openrouter_items)
-    
-    # Database Settings
-    db_items = [
-        ('path', DEFAULT_DB_PATH),
-    ]
-    format_section('Database', db_items)
-    
-    click.echo("\n" + click.style("Config File: ", fg='bright_black') + config.config_path)
-    click.echo()
+
 
 @cli.group()
 def backup():
