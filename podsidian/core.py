@@ -846,7 +846,8 @@ CHANGES MADE:
                 'episode': r['episode'].title,
                 'excerpt': r['excerpt'],
                 'published_at': r['episode'].published_at,
-                'similarity': round(r['similarity'] * 100)  # Convert to percentage
+                'similarity': round(r['similarity'] * 100),  # Convert to percentage
+                'id': r['episode'].id  # Add episode ID
             }
             for r in results[:limit]
         ]

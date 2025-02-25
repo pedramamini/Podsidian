@@ -390,7 +390,9 @@ def search(query, relevance, refresh):
     # Get statistics about searchable content
     total_podcasts = session.query(Podcast).filter_by(muted=False).count()
     total_episodes = session.query(Episode).filter(Episode.vector_embedding.isnot(None)).count()
-    click.echo(f"Searching through {click.style(str(total_podcasts), bold=True)} podcasts and {click.style(str(total_episodes), bold=True)} episodes...")
+    click.echo(f"Searching through {click.style(str(total_podcasts), bold=True)} podcasts and {click.style(str(total_episodes), bold=True)} episodes")
+    click.echo(f"Minimum relevance threshold: {click.style(f'{relevance}%', fg='yellow')}")
+    click.echo("─" * 50)
     
     # Force index refresh if requested
     if refresh:
