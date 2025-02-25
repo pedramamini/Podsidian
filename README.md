@@ -134,7 +134,40 @@ podsidian search "meditation techniques for beginners" --relevance 75
 
 # Start the MCP service
 podsidian mcp --port 8080
+
+# Manage database backups
+podsidian backup create           # Create a new backup with timestamp
+podsidian backup list            # List all available backups
+podsidian backup restore 2025-02-24  # Restore from a specific date
 ```
+
+## Database Backup
+
+Podsidian includes a robust backup system to help you safeguard your podcast database:
+
+- **Automatic Timestamping**: Backups are automatically named with YYYY-MM-DD format
+- **Multiple Daily Backups**: System automatically handles multiple backups on the same day by adding an index
+- **Safe Restore Process**: Creates temporary backup before restore in case of failures
+- **Backup Location**: All backups are stored in `~/.local/share/podsidian/backups`
+
+### Commands
+
+```bash
+# Create a new backup
+podsidian backup create
+
+# List all backups with sizes and dates
+podsidian backup list
+
+# Restore from a specific date
+podsidian backup restore 2025-02-24
+```
+
+When restoring a backup, Podsidian will:
+1. Show size difference between current and backup database
+2. Display time difference between current and backup
+3. Require explicit confirmation before proceeding
+4. Create a temporary backup of your current database as a safety measure
 
 ## How It Works
 

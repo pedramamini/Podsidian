@@ -4,10 +4,12 @@ import uvicorn
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from datetime import datetime
 
 from .models import init_db
 from .core import PodcastProcessor
 from .api import create_api
+from .backup import create_backup, list_backups, restore_backup, find_backup_by_date
 
 import shutil
 from .config import config
@@ -401,6 +403,71 @@ def show_config():
     
     click.echo("\n" + click.style("Config File: ", fg='bright_black') + config.config_path)
     click.echo()
+
+@cli.group()
+def backup():
+    """Manage database backups."""
+    pass
+
+@backup.command(name='create')
+def backup_create():
+    """Create a new backup of the database."""
+    try:
+        backup_path = create_backup(DEFAULT_DB_PATH)
+        click.echo(f"Created backup at: {backup_path}")
+    except Exception as e:
+        click.echo(f"Error creating backup: {str(e)}", err=True)
+
+@backup.command(name='list')
+def backup_list():
+    """List all available backups."""
+    backups = list_backups()
+    
+    if not backups:
+        click.echo("No backups found.")
+        return
+    
+    click.echo("Available backups:")
+    click.echo("-" * 80)
+    
+    for backup in backups:
+        created = datetime.fromisoformat(backup['created']).strftime("%Y-%m-%d %H:%M:%S")
+        size_mb = backup['size'] / (1024 * 1024)
+        click.echo(f"• {created} ({size_mb:.1f} MB)")
+        click.echo(f"  Path: {backup['path']}")
+
+@backup.command(name='restore')
+@click.argument('date')
+def backup_restore(date):
+    """Restore database from a backup.
+    
+    DATE is the backup date in YYYY-MM-DD format.
+    Use 'backup list' to see available backups.
+    """
+    try:
+        # Find backup for the given date
+        backup_path = find_backup_by_date(date)
+        
+        # Get info about current and backup databases
+        current_size = os.path.getsize(DEFAULT_DB_PATH)
+        backup_size = os.path.getsize(backup_path)
+        backup_time = datetime.fromtimestamp(os.path.getmtime(backup_path))
+        current_time = datetime.fromtimestamp(os.path.getmtime(DEFAULT_DB_PATH))
+        
+        # Show differences
+        click.echo("Restore details:")
+        click.echo(f"Selected backup: {backup_path}")
+        click.echo(f"Current database size: {current_size / (1024*1024):.1f} MB")
+        click.echo(f"Backup database size: {backup_size / (1024*1024):.1f} MB")
+        click.echo(f"Current database last modified: {current_time}")
+        click.echo(f"Backup database created: {backup_time}")
+        click.echo(f"Time difference: {current_time - backup_time}")
+        
+        if click.confirm("Are you sure you want to restore this backup? This will overwrite your current database.", abort=True):
+            restore_backup(date, DEFAULT_DB_PATH)
+            click.echo("Backup restored successfully.")
+    except Exception as e:
+        click.echo(f"Error restoring backup: {str(e)}", err=True)
 
 if __name__ == '__main__':
     cli()
