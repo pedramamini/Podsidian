@@ -675,8 +675,8 @@ CHANGES MADE:
     def _find_relevant_excerpt(self, query: str, transcript: str, context_chars: int = 150) -> str:
         """Find the most relevant excerpt from the transcript for the given query.
         
-        Uses semantic search to find the most relevant section of the transcript,
-        even when exact keywords don't match.
+        Uses keyword matching and surrounding context to find relevant excerpts.
+        This is a faster alternative to semantic search for excerpt finding.
         
         Args:
             query: Search query
@@ -689,41 +689,41 @@ CHANGES MADE:
         if not transcript:
             return ""
             
-        # Split transcript into overlapping chunks
-        chunk_size = 200
-        overlap = 50
-        chunks = []
+        # Use simpler keyword matching for excerpts
+        query_terms = query.lower().split()
+        transcript_lower = transcript.lower()
         
-        for i in range(0, len(transcript), chunk_size - overlap):
-            chunk = transcript[i:i + chunk_size]
-            if len(chunk) < 20:  # Skip very small chunks
-                continue
-            chunks.append({
-                'text': chunk,
-                'start': i
-            })
-            
-        if not chunks:
-            return ""
-            
-        # Get embeddings for query and chunks
-        query_embedding = self._generate_embedding(query)
-        chunk_embeddings = [self._generate_embedding(c['text']) for c in chunks]
+        # Find positions of query terms
+        positions = []
+        for term in query_terms:
+            pos = transcript_lower.find(term)
+            if pos != -1:
+                positions.append(pos)
         
-        # Find chunk with highest similarity
-        similarities = [sum(a * b for a, b in zip(query_embedding, chunk_emb)) for chunk_emb in chunk_embeddings]
-        best_chunk_idx = max(range(len(similarities)), key=lambda i: similarities[i])
-        best_chunk = chunks[best_chunk_idx]
+        if not positions:
+            # If no exact matches, take a chunk from the beginning
+            start = 0
+            end = min(300, len(transcript))
+        else:
+            # Use the position with the most surrounding term matches
+            best_pos = max(positions, key=lambda p: sum(1 for pos in positions if abs(pos - p) < 200))
+            start = max(0, best_pos - context_chars)
+            end = min(len(transcript), best_pos + context_chars)
         
-        # Get surrounding context
-        start = max(0, best_chunk['start'] - context_chars)
-        end = min(len(transcript), best_chunk['start'] + len(best_chunk['text']) + context_chars)
-        
-        # Add ellipsis if we truncated the text
+        # Add ellipsis for truncated text
         prefix = "..." if start > 0 else ""
         suffix = "..." if end < len(transcript) else ""
         
-        return prefix + transcript[start:end].strip() + suffix
+        # Get the excerpt and clean it up
+        excerpt = transcript[start:end].strip()
+        
+        # Ensure we don't break in the middle of a word
+        if prefix:
+            excerpt = excerpt[excerpt.find(" ")+1:]
+        if suffix:
+            excerpt = excerpt[:excerpt.rfind(" ")]
+            
+        return prefix + excerpt + suffix
         
     
         
@@ -806,8 +806,16 @@ CHANGES MADE:
             if similarity < relevance_threshold:
                 continue
                 
-            # Get episode from database
-            episode = self.db.query(Episode).filter(Episode.id == self.episode_map[idx]).first()
+        # Batch fetch all potential episodes
+        episode_ids = [self.episode_map[idx] for idx in indices]
+        episodes = {e.id: e for e in self.db.query(Episode).filter(Episode.id.in_(episode_ids)).all()}
+        
+        for idx, similarity in zip(indices, similarities):
+            if similarity < relevance_threshold:
+                continue
+                
+            # Get episode from cached results
+            episode = episodes.get(self.episode_map[idx])
             if not episode:
                 continue
             
