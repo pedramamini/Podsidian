@@ -82,6 +82,7 @@ class PodcastProcessor:
         if not self.embedding_model:
             # This model is better at capturing semantic meaning across languages
             # and produces higher quality sentence embeddings
+            from sentence_transformers import SentenceTransformer
             self.embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
 
     def _download_audio(self, url: str) -> str:
@@ -313,10 +314,10 @@ CHANGES MADE:
         Returns:
             Numpy array representing the text embedding
         """
-        import numpy as np
         self._load_embedding_model()
         embedding = self.embedding_model.encode([text])[0]
         if normalize:
+            import numpy as np
             embedding = embedding / np.linalg.norm(embedding)
         return embedding
 
@@ -783,7 +784,6 @@ CHANGES MADE:
         Returns:
             List of dicts containing search results above the relevance threshold
         """
-        import numpy as np
         self._load_embedding_model()
         
         # Initialize Annoy index if needed

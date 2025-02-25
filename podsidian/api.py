@@ -30,6 +30,7 @@ class SubscriptionInfo(BaseModel):
     author: str = Field(..., description="Podcast author")
     feed_url: str = Field(..., description="RSS feed URL")
     muted: bool = Field(..., description="Whether podcast is muted")
+    episode_count: int = Field(..., description="Number of episodes in database")
 
 # FastAPI app with documentation
 app = FastAPI(

@@ -134,10 +134,12 @@ def subscriptions():
     pass
 
 @subscriptions.command(name='list')
-def list_subscriptions():
+@click.option('--sort', type=click.Choice(['alpha', 'episodes']), default='alpha', help='Sort by name (alpha) or episode count (episodes)')
+def list_subscriptions(sort):
     """List all Apple Podcasts subscriptions."""
     from .apple_podcasts import get_subscriptions
-    from .models import Podcast
+    from .models import Podcast, Episode
+    from sqlalchemy import func
     session = get_db_session()
     
     # Get subscriptions from Apple Podcasts
@@ -145,6 +147,12 @@ def list_subscriptions():
     if not subs:
         click.echo("No Apple Podcasts subscriptions found.")
         return
+    
+    # Get episode counts for each podcast
+    episode_counts = dict(session.query(
+        Podcast.feed_url,
+        func.count(Episode.id).label('count')
+    ).join(Episode, isouter=True).group_by(Podcast.feed_url).all())
     
     # Ensure all podcasts exist in database
     for sub in subs:
@@ -157,6 +165,7 @@ def list_subscriptions():
                 muted=False
             )
             session.add(podcast)
+            episode_counts[sub['feed_url']] = 0
     session.commit()
     
     # Get mute states from database
@@ -165,18 +174,28 @@ def list_subscriptions():
     # Split into muted and unmuted lists
     muted_subs = []
     unmuted_subs = []
-    for sub in sorted(subs, key=lambda x: x['title']):
+    for sub in subs:
         if muted_feeds.get(sub['feed_url'], False):
             muted_subs.append(sub)
         else:
             unmuted_subs.append(sub)
+            
+    # Sort the lists based on the sort option
+    if sort == 'episodes':
+        muted_subs.sort(key=lambda x: (-episode_counts.get(x['feed_url'], 0), x['title'].lower()))
+        unmuted_subs.sort(key=lambda x: (-episode_counts.get(x['feed_url'], 0), x['title'].lower()))
+    else:  # alpha
+        muted_subs.sort(key=lambda x: x['title'].lower())
+        unmuted_subs.sort(key=lambda x: x['title'].lower())
     
     # Show active subscriptions
     click.echo("\nActive Subscriptions:")
     click.echo("-" * 30)
     if unmuted_subs:
         for sub in unmuted_subs:
-            click.echo(f"• {sub['title']}")
+            episode_count = episode_counts.get(sub['feed_url'], 0)
+            episodes_text = f" ({episode_count} episode{'s' if episode_count != 1 else ''})"
+            click.echo(f"• {sub['title']}{episodes_text}")
     else:
         click.echo("No active subscriptions")
     
@@ -185,7 +204,9 @@ def list_subscriptions():
     click.echo("-" * 30)
     if muted_subs:
         for sub in muted_subs:
-            click.echo(f"• {sub['title']}")
+            episode_count = episode_counts.get(sub['feed_url'], 0)
+            episodes_text = f" ({episode_count} episode{'s' if episode_count != 1 else ''})"
+            click.echo(f"• {sub['title']}{episodes_text}")
     else:
         click.echo("No muted subscriptions")
     click.echo()

@@ -119,7 +119,8 @@ podsidian init
 podsidian show-config    # Displays config, vector index status, and episode stats
 
 # Manage podcast subscriptions
-podsidian subscriptions list    # List all subscriptions and their mute state
+podsidian subscriptions list              # List all subscriptions (sorted alphabetically)
+podsidian subscriptions list --sort=episodes  # List all subscriptions (sorted by episode count)
 podsidian subscriptions mute "Podcast Title"    # Mute a podcast (skip during ingestion)
 podsidian subscriptions unmute "Podcast Title"  # Unmute a podcast
 
