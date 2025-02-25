@@ -23,10 +23,11 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
   - Domain-aware transcript correction for technical terms and jargon
   - High-quality output optimized for each podcast's subject matter
 - **AI-Powered Analysis**: Uses OpenRouter to generate customized summaries and insights
-- **Advanced Search Capabilities**: 
-  - Semantic search using natural language queries with configurable relevance thresholds
-  - Keyword search for exact text matches in transcripts
-  - Default relevance threshold of 60 for high-quality matches
+- **Natural Language Search**: 
+  - Intelligent search that understands the meaning of your queries
+  - Finds relevant content even when exact words don't match
+  - Configurable relevance threshold for fine-tuning results
+  - Results grouped by podcast with relevant excerpts
 - **Obsidian Integration**: Generates markdown notes with customizable templates
 - **AI Agent Integration**: Exposes an MCP (Message Control Program) service for AI agents
 
@@ -125,14 +126,11 @@ podsidian ingest --debug
 # Export a specific episode transcript
 podsidian export <episode_id>
 
-# Search through podcast history (semantic search)
-podsidian search semantic "blockchain security"
+# Search through podcast content using natural language
+podsidian search "impact of blockchain on cybersecurity"
 
 # Search with custom relevance threshold (0-100)
-podsidian search semantic "blockchain security" --relevance 75
-
-# Search for exact keyword matches
-podsidian search keyword "blockchain"
+podsidian search "meditation techniques for beginners" --relevance 75
 
 # Start the MCP service
 podsidian mcp --port 8080
@@ -170,8 +168,7 @@ RESTful API for AI agent integration:
 http://localhost:8080/api/v1
 
 # Endpoints
-GET  /search/semantic                    # Semantic search across transcripts
-GET  /search/keyword                     # Keyword search in transcripts
+GET  /search                            # Natural language search across transcripts
 GET  /episodes                           # List all processed episodes
 GET  /episodes/:id                       # Get episode details and transcript
 GET  /subscriptions                      # List all subscriptions with mute state

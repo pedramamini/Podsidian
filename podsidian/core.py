@@ -74,9 +74,15 @@ class PodcastProcessor:
                 })
 
     def _load_embedding_model(self):
-        """Lazy load sentence transformer model."""
+        """Lazy load sentence transformer model.
+        
+        Uses a powerful multilingual model (paraphrase-multilingual-mpnet-base-v2)
+        that's better suited for semantic search and natural language understanding.
+        """
         if not self.embedding_model:
-            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            # This model is better at capturing semantic meaning across languages
+            # and produces higher quality sentence embeddings
+            self.embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
 
     def _download_audio(self, url: str) -> str:
         """Download audio file to temporary location."""
@@ -297,10 +303,26 @@ CHANGES MADE:
 
         return corrected_transcript
 
-    def _generate_embedding(self, text: str) -> List[float]:
-        """Generate vector embedding for text."""
+    def _generate_embedding(self, text: str, normalize: bool = True) -> List[float]:
+        """Generate vector embedding for text.
+        
+        Args:
+            text: Text to generate embedding for
+            normalize: Whether to normalize the embedding vector (default: True)
+            
+        Returns:
+            List of floats representing the text embedding
+        """
         self._load_embedding_model()
-        return self.embedding_model.encode(text).tolist()
+        embedding = self.embedding_model.encode(text)
+        
+        if normalize:
+            # Normalize the vector to unit length
+            norm = (embedding ** 2).sum() ** 0.5
+            if norm > 0:
+                embedding = embedding / norm
+                
+        return embedding.tolist()
 
     def _get_summary(self, transcript: str) -> str:
         """Get AI-generated summary using OpenRouter."""
@@ -613,65 +635,71 @@ CHANGES MADE:
                 self.db.add(episode)
                 self.db.commit()
 
-    def _find_keyword_excerpt(self, keyword: str, transcript: str, context_chars: int = 100) -> str:
-        """Find an excerpt of text containing the keyword with surrounding context."""
-        keyword_lower = keyword.lower()
-        transcript_lower = transcript.lower()
+    def _find_relevant_excerpt(self, query: str, transcript: str, context_chars: int = 150) -> str:
+        """Find the most relevant excerpt from the transcript for the given query.
         
-        # Find the position of the keyword
-        pos = transcript_lower.find(keyword_lower)
-        if pos == -1:
+        Uses semantic search to find the most relevant section of the transcript,
+        even when exact keywords don't match.
+        
+        Args:
+            query: Search query
+            transcript: Full transcript text
+            context_chars: Number of characters of context to include
+            
+        Returns:
+            Most relevant excerpt from the transcript
+        """
+        if not transcript:
             return ""
             
+        # Split transcript into overlapping chunks
+        chunk_size = 200
+        overlap = 50
+        chunks = []
+        
+        for i in range(0, len(transcript), chunk_size - overlap):
+            chunk = transcript[i:i + chunk_size]
+            if len(chunk) < 20:  # Skip very small chunks
+                continue
+            chunks.append({
+                'text': chunk,
+                'start': i
+            })
+            
+        if not chunks:
+            return ""
+            
+        # Get embeddings for query and chunks
+        query_embedding = self._generate_embedding(query)
+        chunk_embeddings = [self._generate_embedding(c['text']) for c in chunks]
+        
+        # Find chunk with highest similarity
+        similarities = [sum(a * b for a, b in zip(query_embedding, chunk_emb)) for chunk_emb in chunk_embeddings]
+        best_chunk_idx = max(range(len(similarities)), key=lambda i: similarities[i])
+        best_chunk = chunks[best_chunk_idx]
+        
         # Get surrounding context
-        start = max(0, pos - context_chars)
-        end = min(len(transcript), pos + len(keyword) + context_chars)
+        start = max(0, best_chunk['start'] - context_chars)
+        end = min(len(transcript), best_chunk['start'] + len(best_chunk['text']) + context_chars)
         
         # Add ellipsis if we truncated the text
         prefix = "..." if start > 0 else ""
         suffix = "..." if end < len(transcript) else ""
         
-        # Get the excerpt with original casing
-        excerpt = transcript[start:end]
+        return prefix + transcript[start:end].strip() + suffix
         
-        return prefix + excerpt + suffix
-        
-    def keyword_search(self, keyword: str, limit: int = 10) -> List[Dict]:
-        """Search through podcast transcripts for exact keyword matches.
-        
-        Args:
-            keyword: Exact text to search for (case-insensitive)
-            limit: Maximum number of results to return
-            
-        Returns:
-            List of dicts containing episodes with matching transcripts
-        """
-        results = []
-        keyword_lower = keyword.lower()
-        
-        # Search through all episodes with transcripts
-        for episode in self.db.query(Episode).filter(Episode.transcript.isnot(None)):
-            if keyword_lower in episode.transcript.lower():
-                # Find a relevant excerpt containing the keyword
-                excerpt = self._find_keyword_excerpt(keyword, episode.transcript)
-                
-                results.append({
-                    'podcast': episode.podcast.title,
-                    'episode': episode.title,
-                    'published_at': episode.published_at,
-                    'excerpt': excerpt
-                })
-                
-                if len(results) >= limit:
-                    break
-                    
-        return results
+    
         
     def search(self, query: str, limit: int = 10, relevance_threshold: float = 0.60) -> List[Dict]:
-        """Search through podcast transcripts using vector similarity.
+        """Search through podcast content using natural language understanding.
+        
+        This implementation is inspired by Spotify's podcast search, using semantic
+        similarity to match content even when exact keywords don't match. It considers
+        multiple fields (title, description, transcript) and uses a powerful multilingual
+        model for better understanding.
         
         Args:
-            query: Search query string
+            query: Natural language search query
             limit: Maximum number of results to return
             relevance_threshold: Minimum similarity score (0.0 to 1.0) for results
             
@@ -679,35 +707,55 @@ CHANGES MADE:
             List of dicts containing search results above the relevance threshold
         """
         self._load_embedding_model()
+        
+        # Generate query embedding
         query_embedding = self._generate_embedding(query)
-
-        # This is a simple implementation - in production you'd want to use a proper vector database
+        
+        # Search through episodes with embeddings
         results = []
         for episode in self.db.query(Episode).filter(Episode.vector_embedding.isnot(None)):
+            # Get episode metadata
+            title = episode.title
+            description = episode.description or ''
+            podcast_title = episode.podcast.title
+            
+            # Create rich text representation for better context
+            rich_text = f"{podcast_title}. {title}. {description}"
+            
+            # Get episode embedding
             episode_embedding = json.loads(episode.vector_embedding)
-            # Compute cosine similarity
+            
+            # Compute semantic similarity
             similarity = sum(a * b for a, b in zip(query_embedding, episode_embedding))
             
+            # Boost score if query terms appear in title/description
+            query_terms = set(query.lower().split())
+            text_terms = set(rich_text.lower().split())
+            term_overlap = len(query_terms & text_terms) / len(query_terms)
+            
+            # Combine semantic and term-based scores
+            combined_score = (0.7 * similarity) + (0.3 * term_overlap)
+            
             # Only include results above threshold
-            if similarity >= relevance_threshold:
-                # Find a relevant excerpt
-                excerpt = self._find_keyword_excerpt(query, episode.transcript)
+            if combined_score >= relevance_threshold:
+                # Find most relevant excerpt
+                excerpt = self._find_relevant_excerpt(query, episode.transcript)
                 
                 results.append({
                     'episode': episode,
-                    'similarity': similarity,
+                    'similarity': combined_score,
                     'excerpt': excerpt
                 })
-
-        # Sort by similarity and return top results
+        
+        # Sort by combined score and return top results
         results.sort(key=lambda x: x['similarity'], reverse=True)
         return [
             {
                 'podcast': r['episode'].podcast.title,
                 'episode': r['episode'].title,
-                'transcript': r['episode'].transcript,
+                'excerpt': r['excerpt'],
                 'published_at': r['episode'].published_at,
-                'similarity': r['similarity']
+                'similarity': round(r['similarity'] * 100)  # Convert to percentage
             }
             for r in results[:limit]
         ]

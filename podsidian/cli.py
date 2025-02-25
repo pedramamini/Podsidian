@@ -262,16 +262,19 @@ def ingest(lookback, debug):
     processor.ingest_subscriptions(lookback_days=lookback, progress_callback=show_progress, debug=debug)
     click.echo("\n\nIngestion complete!")
 
-@cli.group()
-def search():
-    """Search through podcast history."""
-    pass
-
-@search.command('semantic')
+@cli.command()
 @click.argument('query')
 @click.option('--relevance', type=int, default=25, help='Minimum relevance score (0-100) for results')
-def semantic_search(query, relevance):
-    """Search using semantic similarity (embeddings)."""
+def search(query, relevance):
+    """Search through podcast content using natural language.
+    
+    Uses AI to find relevant content even when exact words don't match.
+    Results are ranked by relevance to your query.
+    
+    Examples:
+        podsidian search "electric cars impact on climate"
+        podsidian search "meditation techniques" --relevance 50
+    """
     session = get_db_session()
     processor = PodcastProcessor(session)
     
@@ -279,43 +282,35 @@ def semantic_search(query, relevance):
     relevance_float = relevance / 100.0
     results = processor.search(query, relevance_threshold=relevance_float)
     
-    # Sort by relevance score
-    results = sorted(results, key=lambda x: x['similarity'], reverse=True)
-    
     if not results:
         click.echo("No results found matching your query with the current relevance threshold.")
         click.echo(f"Try lowering the threshold (current: {relevance}%)")
         return
-        
-    for result in results:
-        click.echo(f"\n{result['podcast']} - {result['episode']}")
-        click.echo(f"Published: {result['published_at']}")
-        # Convert similarity back to percentage
-        similarity_pct = int(result['similarity'] * 100)
-        click.echo(f"Relevance: {similarity_pct}%")
-        if result['transcript']:
-            click.echo("\nRelevant transcript excerpt:")
-            # Show first 200 characters of transcript
-            click.echo(result['transcript'][:200] + "...")
-
-@search.command('keyword')
-@click.argument('keyword')
-def keyword_search(keyword):
-    """Search for exact keyword matches in transcripts."""
-    session = get_db_session()
-    processor = PodcastProcessor(session)
     
-    results = processor.keyword_search(keyword)
-    
-    if not results:
-        click.echo("No exact matches found for your keyword.")
-        return
-        
+    # Group results by podcast
+    podcasts = {}
     for result in results:
-        click.echo(f"\n{result['podcast']} - {result['episode']}")
-        click.echo(f"Published: {result['published_at']}")
-        click.echo(f"\nMatching excerpt:")
-        click.echo(result['excerpt'])
+        if result['podcast'] not in podcasts:
+            podcasts[result['podcast']] = []
+        podcasts[result['podcast']].append(result)
+    
+    # Display results grouped by podcast
+    for podcast, episodes in podcasts.items():
+        click.echo(f"\n{click.style(podcast, fg='blue', bold=True)}:")
+        click.echo("-" * len(podcast))
+        
+        for result in episodes:
+            # Show episode title and metadata
+            date_str = result['published_at'].strftime("%Y-%m-%d") if result['published_at'] else "No date"
+            click.echo(f"\n{click.style(result['episode'], bold=True)} ({date_str})")
+            click.echo(f"Relevance: {click.style(f'{result['similarity']}%', fg='green')}")
+            
+            # Show relevant excerpt
+            if result.get('excerpt'):
+                click.echo("\nRelevant excerpt:")
+                click.echo(f"{click.style('│ ', fg='bright_black')}{result['excerpt']}")
+            
+    click.echo("\nTip: Use --relevance to adjust the minimum relevance score (0-100)")
 
 @cli.command()
 @click.argument('episode_id', type=int)
