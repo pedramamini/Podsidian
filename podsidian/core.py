@@ -458,8 +458,6 @@ CHANGES MADE:
                 'total_podcasts': len(subscriptions)
             })
 
-        # Filter out ignored podcasts
-        subscriptions = [s for s in subscriptions if s['title'] not in self.config.ignore_podcasts]
 
         for podcast_idx, sub in enumerate(subscriptions, 1):
             # Progress update for podcast

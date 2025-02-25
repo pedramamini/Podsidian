@@ -11,9 +11,6 @@ WHISPER_MODELS = {
 }
 
 DEFAULT_CONFIG = {
-    "podcasts": {
-        "ignore": []  # List of podcast titles to ignore
-    },
     "whisper": {
         "model": "large-v3",
         "language": "",
@@ -188,10 +185,6 @@ class Config:
         """Number of threads to use for CPU inference."""
         return self.config["whisper"]["threads"]
     
-    @property
-    def ignore_podcasts(self) -> List[str]:
-        """Get list of podcast titles to ignore."""
-        return self.config["podcasts"]["ignore"]
         
     @property
     def value_prompt_enabled(self) -> bool:
