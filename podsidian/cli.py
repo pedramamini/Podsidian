@@ -359,15 +359,24 @@ def show_config():
         click.echo("\n" + " " * indent + click.style(f"[{title}]", fg='green', bold=True))
         for key, value in items:
             # Skip the template and prompt as they're too long
-            if key in ['template', 'prompt']:
+            if key in ['template', 'prompt', 'value_prompt']:
                 value = '<configured>' if value else '<not configured>'
             # Mask API key
             elif key == 'api_key':
                 value = '***' + value[-4:] if value else '<not set>'
+            # Format lists nicely
+            elif isinstance(value, list):
+                value = '\n' + '\n'.join([' ' * (indent + 4) + '• ' + str(item) for item in value]) if value else '<none>'
             click.echo(" " * (indent + 2) + click.style(f"{key}: ", fg='bright_black') + str(value))
     
     click.echo(click.style("\nPodsidian Configuration", fg='blue', bold=True))
     click.echo(click.style("=" * 21, fg='blue'))
+    
+    # Podcasts Settings
+    podcasts_items = [
+        ('ignore', config.ignore_podcasts)
+    ]
+    format_section('Podcasts', podcasts_items)
     
     # Obsidian Settings
     obsidian_items = [
@@ -391,7 +400,9 @@ def show_config():
         ('model', config.openrouter_model),
         ('processing_model', config.openrouter_processing_model),
         ('topic_sample_size', config.topic_sample_size),
-        ('prompt', config.openrouter_prompt)
+        ('prompt', config.openrouter_prompt),
+        ('value_prompt_enabled', config.value_prompt_enabled),
+        ('value_prompt', config.value_prompt)
     ]
     format_section('OpenRouter', openrouter_items)
     
