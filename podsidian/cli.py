@@ -280,6 +280,12 @@ def search(query, relevance):
     session = get_db_session()
     processor = PodcastProcessor(session)
     
+    # Get statistics about searchable content
+    from .models import Podcast, Episode
+    total_podcasts = session.query(Podcast).filter_by(muted=False).count()
+    total_episodes = session.query(Episode).filter(Episode.vector_embedding.isnot(None)).count()
+    click.echo(f"Searching through {click.style(str(total_podcasts), bold=True)} podcasts and {click.style(str(total_episodes), bold=True)} episodes...")
+    
     # Convert relevance to 0-1 scale
     relevance_float = relevance / 100.0
     results = processor.search(query, relevance_threshold=relevance_float)
