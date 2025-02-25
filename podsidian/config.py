@@ -17,6 +17,11 @@ DEFAULT_CONFIG = {
         "cpu_only": False,
         "threads": 4
     },
+    "annoy": {
+        "index_path": "~/.config/podsidian/annoy.idx",
+        "n_trees": 10,  # More trees = better accuracy but slower build
+        "metric": "angular"  # angular = cosine similarity
+    },
     "obsidian": {
         "vault_path": "~/Documents/Obsidian",
         "template": """# {title}
@@ -194,6 +199,23 @@ class Config:
     @property
     def value_prompt(self) -> str:
         """Get the configured value prompt template."""
+        return self.config["openrouter"]["value_prompt"]
+    
+    @property
+    def annoy_index_path(self) -> str:
+        """Get the configured Annoy index path."""
+        path = self.config["annoy"]["index_path"]
+        return os.path.expanduser(path)
+    
+    @property
+    def annoy_n_trees(self) -> int:
+        """Get the configured number of trees for Annoy index."""
+        return self.config["annoy"]["n_trees"]
+    
+    @property
+    def annoy_metric(self) -> str:
+        """Get the configured distance metric for Annoy index."""
+        return self.config["annoy"]["metric"]
         return self.config["openrouter"]["value_prompt"]
 
 # Global config instance

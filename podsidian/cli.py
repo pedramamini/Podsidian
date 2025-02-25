@@ -33,6 +33,32 @@ def cli():
     """Podsidian - Apple Podcasts to Obsidian Bridge"""
     pass
 
+@cli.command(name='show-config')
+def show_config():
+    """Show current configuration and status."""
+    from .config import config
+    from .models import Episode
+    session = get_db_session()
+    
+    # Get Annoy index info
+    annoy_path = config.annoy_index_path
+    annoy_exists = os.path.exists(annoy_path)
+    annoy_size = os.path.getsize(annoy_path) if annoy_exists else 0
+    
+    # Get episode stats
+    total_episodes = session.query(Episode).count()
+    episodes_with_embeddings = session.query(Episode).filter(Episode.vector_embedding.isnot(None)).count()
+    
+    click.echo("\nAnnoy Vector Index:")
+    click.echo(f"  Path: {click.style(annoy_path, fg='blue')}")
+    click.echo(f"  Exists: {click.style('Yes', fg='green') if annoy_exists else click.style('No', fg='red')}")
+    if annoy_exists:
+        click.echo(f"  Size: {click.style(str(round(annoy_size / 1024 / 1024, 2)), fg='blue')} MB")
+    
+    click.echo("\nEpisode Statistics:")
+    click.echo(f"  Total Episodes: {click.style(str(total_episodes), fg='blue')}")
+    click.echo(f"  Episodes with Embeddings: {click.style(str(episodes_with_embeddings), fg='blue')}")
+    
 @cli.command()
 def init():
     """Initialize Podsidian configuration."""

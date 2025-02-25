@@ -18,6 +18,7 @@ dependencies = [
     "sqlite-utils>=3.35.2",
     "obsidian-py>=0.2.1",
     "tomli>=2.0.1",
+    "annoy>=1.17.3",
 ]
 requires-python = ">=3.9"
 

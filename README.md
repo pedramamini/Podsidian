@@ -14,7 +14,8 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
   - Configurable lookback period for older episodes
 - **Smart Storage**:
   - SQLite3 database for episode metadata and full transcripts
-  - Vector embeddings for efficient semantic search
+  - Annoy vector index for fast semantic search (inspired by Spotify)
+  - Vector embeddings for efficient content discovery
   - Configurable Obsidian markdown export
 - **Efficient Processing**: Downloads and transcribes episodes, then discards audio to save space
 - **Smart Transcription Pipeline**:
@@ -24,6 +25,7 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
   - High-quality output optimized for each podcast's subject matter
 - **AI-Powered Analysis**: Uses OpenRouter to generate customized summaries and insights
 - **Natural Language Search**: 
+  - Fast semantic search powered by Spotify's Annoy library
   - Intelligent search that understands the meaning of your queries
   - Finds relevant content even when exact words don't match
   - Configurable relevance threshold for fine-tuning results
@@ -95,6 +97,16 @@ model = "anthropic/claude-2"
 # Customize summary prompt
 prompt = """Your custom prompt template here.
 Available variable: {transcript}"""
+
+[annoy]
+# Path to vector index file
+index_path = "~/.config/podsidian/annoy.idx"
+
+# Number of trees (more = better accuracy but slower build)
+n_trees = 10
+
+# Distance metric (angular = cosine similarity)
+metric = "angular"
 ```
 
 ## Usage
@@ -103,8 +115,8 @@ Available variable: {transcript}"""
 # Initialize configuration
 podsidian init
 
-# Show current configuration
-podsidian show-config
+# Show configuration and system status
+podsidian show-config    # Displays config, vector index status, and episode stats
 
 # Manage podcast subscriptions
 podsidian subscriptions list    # List all subscriptions and their mute state
@@ -169,6 +181,20 @@ When restoring a backup, Podsidian will:
 3. Require explicit confirmation before proceeding
 4. Create a temporary backup of your current database as a safety measure
 
+## System Status
+
+Use the `show-config` command to view the current state of your Podsidian installation:
+
+```bash
+podsidian show-config
+```
+
+This will display:
+- Vector index location and size
+- Number of total episodes
+- Number of episodes with embeddings
+- Other configuration settings
+
 ## How It Works
 
 1. **Podcast Discovery**:
@@ -180,6 +206,7 @@ When restoring a backup, Podsidian will:
    - Downloads episodes temporarily
    - Transcribes using Whisper AI
    - Generates vector embeddings
+   - Updates Annoy vector index
    - Stores in SQLite database
 
 3. **AI Processing**:

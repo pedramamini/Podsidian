@@ -6,10 +6,12 @@ import tempfile
 import feedparser
 import whisper
 import requests
+import numpy as np
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from sqlalchemy.orm import Session
+from annoy import AnnoyIndex
 
 # Set tokenizers parallelism before importing transformers
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
@@ -23,6 +25,8 @@ class PodcastProcessor:
         self.db = db_session
         self.whisper_model = None
         self.embedding_model = None
+        self.annoy_index = None
+        self.episode_map = {}  # Maps Annoy index to Episode ID
 
         # Import here to avoid circular imports
         from .config import config
@@ -303,7 +307,7 @@ CHANGES MADE:
 
         return corrected_transcript
 
-    def _generate_embedding(self, text: str, normalize: bool = True) -> List[float]:
+    def _generate_embedding(self, text: str, normalize: bool = True) -> np.ndarray:
         """Generate vector embedding for text.
         
         Args:
@@ -311,10 +315,13 @@ CHANGES MADE:
             normalize: Whether to normalize the embedding vector (default: True)
             
         Returns:
-            List of floats representing the text embedding
+            Numpy array representing the text embedding
         """
         self._load_embedding_model()
-        embedding = self.embedding_model.encode(text)
+        embedding = self.embedding_model.encode([text])[0]
+        if normalize:
+            embedding = embedding / np.linalg.norm(embedding)
+        return embedding
         
         if normalize:
             # Normalize the vector to unit length
@@ -628,7 +635,18 @@ CHANGES MADE:
                     if progress_callback:
                         progress_callback({'stage': 'embedding', 'podcast': sub, 'episode': {'title': episode.title}})
                     try:
-                        episode.vector_embedding = json.dumps(self._generate_embedding(episode.transcript))
+                        embedding = self._generate_embedding(episode.transcript)
+                        episode.vector_embedding = json.dumps(embedding.tolist())
+                        
+                        # Update Annoy index
+                        if self.annoy_index is None:
+                            self._init_annoy_index()
+                        
+                        idx = len(self.episode_map)
+                        self.episode_map[idx] = episode.id
+                        self.annoy_index.add_item(idx, embedding)
+                        self.annoy_index.build(self.config.annoy_n_trees)
+                        self.annoy_index.save(self.config.annoy_index_path)
                     except Exception as e:
                         raise Exception(f"Failed to generate embedding: {str(e)}")
 
@@ -719,13 +737,40 @@ CHANGES MADE:
         
     
         
+    def _init_annoy_index(self) -> None:
+        """Initialize or load the Annoy index."""
+        # Get embedding dimension from model
+        if self.embedding_model is None:
+            self._load_embedding_model()
+        sample_embedding = self.embedding_model.encode(["sample text"])[0]
+        embedding_dim = len(sample_embedding)
+        
+        # Create new index
+        self.annoy_index = AnnoyIndex(embedding_dim, self.config.annoy_metric)
+        
+        # Load existing index if it exists
+        index_path = self.config.annoy_index_path
+        if os.path.exists(index_path):
+            self.annoy_index.load(index_path)
+            
+            # Rebuild episode map
+            self.episode_map = {}
+            for episode in self.db.query(Episode).filter(Episode.vector_embedding.isnot(None)):
+                idx = len(self.episode_map)
+                self.episode_map[idx] = episode.id
+                self.annoy_index.add_item(idx, np.array(json.loads(episode.vector_embedding)))
+            
+            # Rebuild index if needed
+            if len(self.episode_map) > self.annoy_index.get_n_items():
+                self.annoy_index.build(self.config.annoy_n_trees)
+                self.annoy_index.save(index_path)
+    
     def search(self, query: str, limit: int = 10, relevance_threshold: float = 0.60) -> List[Dict]:
         """Search through podcast content using natural language understanding.
         
         This implementation is inspired by Spotify's podcast search, using semantic
-        similarity to match content even when exact keywords don't match. It considers
-        multiple fields (title, description, transcript) and uses a powerful multilingual
-        model for better understanding.
+        similarity to match content even when exact keywords don't match. It uses
+        Annoy for fast approximate nearest neighbor search.
         
         Args:
             query: Natural language search query
@@ -737,12 +782,31 @@ CHANGES MADE:
         """
         self._load_embedding_model()
         
+        # Initialize Annoy index if needed
+        if self.annoy_index is None:
+            self._init_annoy_index()
+        
         # Generate query embedding
         query_embedding = self._generate_embedding(query)
         
-        # Search through episodes with embeddings
+        # Get nearest neighbors from Annoy
+        n_results = min(limit * 2, self.annoy_index.get_n_items())  # Get extra results for filtering
+        indices, distances = self.annoy_index.get_nns_by_vector(
+            query_embedding, n_results, include_distances=True)
+        
+        # Convert distances to similarities (Annoy returns squared L2 distance for 'angular')
+        similarities = [1 - (d / 2) for d in distances]  # Convert to cosine similarity
+        
         results = []
-        for episode in self.db.query(Episode).filter(Episode.vector_embedding.isnot(None)):
+        for idx, similarity in zip(indices, similarities):
+            if similarity < relevance_threshold:
+                continue
+                
+            # Get episode from database
+            episode = self.db.query(Episode).filter(Episode.id == self.episode_map[idx]).first()
+            if not episode:
+                continue
+            
             # Get episode metadata
             title = episode.title
             description = episode.description or ''
@@ -750,12 +814,6 @@ CHANGES MADE:
             
             # Create rich text representation for better context
             rich_text = f"{podcast_title}. {title}. {description}"
-            
-            # Get episode embedding
-            episode_embedding = json.loads(episode.vector_embedding)
-            
-            # Compute semantic similarity
-            similarity = sum(a * b for a, b in zip(query_embedding, episode_embedding))
             
             # Boost score if query terms appear in title/description
             query_terms = set(query.lower().split())
