@@ -754,20 +754,28 @@ CHANGES MADE:
         
         # Load existing index if it exists and we're not forcing a rebuild
         index_path = self.config.annoy_index_path
+        episodes_with_embeddings = self.db.query(Episode).filter(Episode.vector_embedding.isnot(None)).all()
+        
         if os.path.exists(index_path) and not force_rebuild:
             self.annoy_index.load(index_path)
+            # Check if we need to rebuild by comparing episode count
+            if len(episodes_with_embeddings) <= self.annoy_index.get_n_items():
+                # Just rebuild episode map without modifying index
+                self.episode_map = {}
+                for idx, episode in enumerate(episodes_with_embeddings):
+                    self.episode_map[idx] = episode.id
+                return
         
-        # Rebuild episode map and index
+        # If we get here, we need to rebuild the index
         self.episode_map = {}
-        for episode in self.db.query(Episode).filter(Episode.vector_embedding.isnot(None)):
+        for episode in episodes_with_embeddings:
             idx = len(self.episode_map)
             self.episode_map[idx] = episode.id
             self.annoy_index.add_item(idx, np.array(json.loads(episode.vector_embedding)))
         
         # Build and save index
-        if force_rebuild or len(self.episode_map) > self.annoy_index.get_n_items():
-            self.annoy_index.build(self.config.annoy_n_trees)
-            self.annoy_index.save(index_path)
+        self.annoy_index.build(self.config.annoy_n_trees)
+        self.annoy_index.save(index_path)
     
     def search(self, query: str, limit: int = 10, relevance_threshold: float = 0.60) -> List[Dict]:
         """Search through podcast content using natural language understanding.
