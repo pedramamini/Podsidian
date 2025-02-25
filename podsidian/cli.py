@@ -1,17 +1,11 @@
 import os
 import click
-import uvicorn
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 
 from .models import init_db, Podcast
-from .core import PodcastProcessor
-from .api import create_api
-from .backup import create_backup, list_backups, restore_backup, find_backup_by_date
-
-import shutil
 from .config import config
 
 # Get default paths
@@ -36,8 +30,6 @@ def cli():
 @cli.command(name='show-config')
 def show_config():
     """Show current configuration and status."""
-    from .config import config
-    from .models import Episode, Podcast
     session = get_db_session()
     
     def print_section(title, items, indent=0):
@@ -60,6 +52,7 @@ def show_config():
     annoy_size = os.path.getsize(annoy_path) if annoy_exists else 0
     
     # Get episode stats
+    from .models import Episode, Podcast
     total_episodes = session.query(Episode).count()
     episodes_with_embeddings = session.query(Episode).filter(Episode.vector_embedding.isnot(None)).count()
     
@@ -269,6 +262,8 @@ def ingest(lookback, debug):
     By default, only processes episodes published in the last 7 days.
     Use --lookback to override this (e.g. --lookback 30 for last 30 days).
     """
+    from .core import PodcastProcessor
+    
     session = get_db_session()
     processor = PodcastProcessor(session)
     
@@ -365,11 +360,13 @@ def search(query, relevance, refresh):
         podsidian search "electric cars impact on climate"
         podsidian search "meditation techniques" --relevance 50
     """
+    from .core import PodcastProcessor
+    from .models import Podcast, Episode
+    
     session = get_db_session()
     processor = PodcastProcessor(session)
     
     # Get statistics about searchable content
-    from .models import Podcast, Episode
     total_podcasts = session.query(Podcast).filter_by(muted=False).count()
     total_episodes = session.query(Episode).filter(Episode.vector_embedding.isnot(None)).count()
     click.echo(f"Searching through {click.style(str(total_podcasts), bold=True)} podcasts and {click.style(str(total_episodes), bold=True)} episodes...")

@@ -4,18 +4,11 @@ import json
 import time
 import tempfile
 import feedparser
-import whisper
 import requests
-import numpy as np
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 from sqlalchemy.orm import Session
-from annoy import AnnoyIndex
-
-# Set tokenizers parallelism before importing transformers
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-from sentence_transformers import SentenceTransformer
 
 from .models import Podcast, Episode
 from .apple_podcasts import get_subscriptions
@@ -38,7 +31,10 @@ class PodcastProcessor:
             import torch
             import warnings
             import whisper
-
+            
+            # Set tokenizers parallelism
+            os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+            
             if hasattr(self, '_progress_callback') and self._debug:
                 self._progress_callback({
                     'stage': 'debug',
@@ -307,7 +303,7 @@ CHANGES MADE:
 
         return corrected_transcript
 
-    def _generate_embedding(self, text: str, normalize: bool = True) -> np.ndarray:
+    def _generate_embedding(self, text: str, normalize: bool = True) -> 'np.ndarray':
         """Generate vector embedding for text.
         
         Args:
@@ -317,19 +313,12 @@ CHANGES MADE:
         Returns:
             Numpy array representing the text embedding
         """
+        import numpy as np
         self._load_embedding_model()
         embedding = self.embedding_model.encode([text])[0]
         if normalize:
             embedding = embedding / np.linalg.norm(embedding)
         return embedding
-        
-        if normalize:
-            # Normalize the vector to unit length
-            norm = (embedding ** 2).sum() ** 0.5
-            if norm > 0:
-                embedding = embedding / norm
-                
-        return embedding.tolist()
 
     def _get_summary(self, transcript: str) -> str:
         """Get AI-generated summary using OpenRouter."""
@@ -750,6 +739,7 @@ CHANGES MADE:
         embedding_dim = len(sample_embedding)
         
         # Create new index
+        from annoy import AnnoyIndex
         self.annoy_index = AnnoyIndex(embedding_dim, self.config.annoy_metric)
         
         # Load existing index if it exists and we're not forcing a rebuild
@@ -769,6 +759,7 @@ CHANGES MADE:
         # If we get here, we need to rebuild the index
         self.episode_map = {}
         for episode in episodes_with_embeddings:
+            import numpy as np
             idx = len(self.episode_map)
             self.episode_map[idx] = episode.id
             self.annoy_index.add_item(idx, np.array(json.loads(episode.vector_embedding)))
@@ -792,6 +783,7 @@ CHANGES MADE:
         Returns:
             List of dicts containing search results above the relevance threshold
         """
+        import numpy as np
         self._load_embedding_model()
         
         # Initialize Annoy index if needed
