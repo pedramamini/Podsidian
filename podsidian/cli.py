@@ -7,6 +7,7 @@ from datetime import datetime
 
 from .models import init_db, Podcast
 from .config import config
+from .backup import create_backup, list_backups, find_backup_by_date, restore_backup
 
 # Get default paths
 DEFAULT_DB_PATH = os.path.expanduser("~/.local/share/podsidian/podsidian.db")
@@ -505,6 +506,13 @@ def backup_list():
         size_mb = backup['size'] / (1024 * 1024)
         click.echo(f"• {created} ({size_mb:.1f} MB)")
         click.echo(f"  Path: {backup['path']}")
+        
+        # Show subscription and episode counts if available
+        if backup['subscriptions'] is not None and backup['episodes'] is not None:
+            click.echo(f"  Contents: {backup['subscriptions']} subscriptions, {backup['episodes']} episodes")
+        
+        # Add a blank line between entries
+        click.echo("")
 
 @backup.command(name='restore')
 @click.argument('date')

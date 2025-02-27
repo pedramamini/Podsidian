@@ -1,5 +1,6 @@
 import os
 import shutil
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict
@@ -36,10 +37,32 @@ def list_backups() -> List[Dict[str, str]]:
     
     for backup in sorted(backup_dir.glob("podsidian-*.db")):
         stats = backup.stat()
+        
+        # Get subscription and episode counts
+        try:
+            conn = sqlite3.connect(str(backup))
+            cur = conn.cursor()
+            
+            # Get subscription count
+            cur.execute("SELECT COUNT(*) FROM podcasts")
+            sub_count = cur.fetchone()[0]
+            
+            # Get episode count
+            cur.execute("SELECT COUNT(*) FROM episodes")
+            ep_count = cur.fetchone()[0]
+            
+            conn.close()
+        except Exception:
+            # If we can't read the database, set counts to None
+            sub_count = None
+            ep_count = None
+        
         backups.append({
             'path': str(backup),
             'size': stats.st_size,
-            'created': datetime.fromtimestamp(stats.st_mtime).isoformat()
+            'created': datetime.fromtimestamp(stats.st_mtime).isoformat(),
+            'subscriptions': sub_count,
+            'episodes': ep_count
         })
     
     return backups
