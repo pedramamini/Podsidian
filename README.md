@@ -57,6 +57,26 @@ pip install -e .
 
 Note: We use `hatch` as our build system. The `-e` flag installs the package in editable mode, which is recommended for development.
 
+### OSX XCode Issues
+
+If you have build issues, try:
+
+```
+sudo xcode-select --reset
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+
+sudo xcodebuild -license
+
+export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+export CFLAGS="-isysroot $SDKROOT -I$SDKROOT/usr/include"
+export CXXFLAGS="$CFLAGS"
+export LDFLAGS="-L$SDKROOT/usr/lib"
+export PATH="$SDKROOT/usr/bin:$PATH"
+
+rm -rf ~/.cache/uv/builds-v0
+uv pip install -e .
+```
+
 ## Configuration
 
 1. Initialize configuration:
