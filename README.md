@@ -91,14 +91,87 @@ This creates a config file at `~/.config/podsidian/config.toml`
 # Path to your Obsidian vault
 vault_path = "~/Documents/Obsidian"
 
-# Customize note template
+# Template for generated notes
+# Available variables: {title}, {podcast_title}, {published_at}, {audio_url}, {summary}, {value_analysis}, {transcript}
 template = """
-# {title}
+{title}
 
-## Metadata
+# Metadata
 - **Podcast**: {podcast_title}
 - **Published**: {published_at}
 - **URL**: {audio_url}
+
+# Summary
+{summary}
+
+# Value Analysis
+{value_analysis}
+
+# Transcript
+{transcript}
+"""
+
+[whisper]
+# Model size to use for transcription
+# Options: tiny, base, small, medium, large, large-v3
+# Larger models are more accurate but slower and use more memory
+# Model sizes and VRAM requirements:
+# - tiny: 1GB VRAM, fastest, least accurate
+# - base: 1GB VRAM, good balance for most uses
+# - small: 2GB VRAM, better accuracy
+# - medium: 5GB VRAM, high accuracy
+# - large: 10GB VRAM, very high accuracy
+# - large-v3: 10GB VRAM, highest accuracy, improved performance
+model = "medium.en"
+
+# Language to use for transcription (optional)
+# If not specified, Whisper will auto-detect the language
+# Example: "en" for English, "es" for Spanish, etc.
+language = ""
+
+# Use CPU instead of GPU for inference
+# Set to true if you don't have a GPU or encounter GPU memory issues
+cpu_only = false
+
+# Number of threads to use for CPU inference
+# Default is 4, increase for faster CPU processing if available
+threads = 4
+
+[openrouter]
+# OpenRouter API configuration
+# API key can also be set via PODSIDIAN_OPENROUTER_API_KEY environment variable
+api_key = ""
+
+# Model to use for topic detection and transcript correction
+processing_model = "openai/gpt-4o"
+
+# Sample size in characters for topic detection
+topic_sample_size = 4096
+
+# Model to use for summarization
+# See https://openrouter.ai/docs for available models
+model = "openai/gpt-4o"
+
+# Prompt template for processing transcripts
+# Available variables: {transcript}
+prompt = """You are a helpful podcast summarizer.
+Given the following podcast transcript, provide:
+1. A concise 2-3 paragraph summary of the key points
+2. A bullet list of the most important takeaways
+3. Any notable quotes, properly attributed
+
+Transcript:
+{transcript}
+"""
+
+# Enable value analysis in output
+# When enabled, each episode will include a Value Per Minute (VPM) analysis
+value_prompt_enabled = true
+
+# Value analysis prompt template
+# This prompt analyzes the transcript to determine its value density
+# This prompt is from Daniel Miessler's Fabric (https://github.com/danielmiessler/fabric)
+# Available variables: {transcript}
 
 ## Summary
 {summary}
