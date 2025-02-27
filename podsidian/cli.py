@@ -1,5 +1,6 @@
 import os
 import click
+import shutil
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -31,6 +32,13 @@ def cli():
 @cli.command(name='show-config')
 def show_config():
     """Show current configuration and status."""
+    # Check if config file exists
+    if not os.path.exists(config.config_path):
+        click.echo(click.style("\nWarning: No configuration file found!", fg='red', bold=True))
+        click.echo(click.style("Run 'podsidian init' to create a default configuration file,", fg='yellow'))
+        click.echo(click.style("then adjust the settings in " + config.config_path + " as needed.\n", fg='yellow'))
+        return
+        
     session = get_db_session()
     
     def print_section(title, items, indent=0):
