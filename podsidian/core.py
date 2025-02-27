@@ -609,7 +609,15 @@ CHANGES MADE:
                     if progress_callback:
                         progress_callback({'stage': 'downloading', 'podcast': sub, 'episode': {'title': episode.title}})
                     try:
+                        start_time = time.time()
                         temp_path = self._download_audio(audio_url)
+                        download_time = time.time() - start_time
+                        
+                        if progress_callback:
+                            progress_callback({
+                                'stage': 'timing',
+                                'message': f'Audio download took {download_time:.2f} seconds'
+                            })
                     except requests.exceptions.RequestException as e:
                         raise Exception(f"Failed to download audio: {str(e)}")
 
@@ -617,7 +625,15 @@ CHANGES MADE:
                     if progress_callback:
                         progress_callback({'stage': 'transcribing', 'podcast': sub, 'episode': {'title': episode.title}})
                     try:
+                        start_time = time.time()
                         episode.transcript = self._transcribe_audio(temp_path, episode.title, progress_callback, debug=debug)
+                        transcribe_time = time.time() - start_time
+                        
+                        if progress_callback:
+                            progress_callback({
+                                'stage': 'timing',
+                                'message': f'Audio transcription took {transcribe_time:.2f} seconds'
+                            })
                     except Exception as e:
                         raise Exception(f"Failed to transcribe audio: {str(e)}")
 
@@ -625,18 +641,16 @@ CHANGES MADE:
                     if progress_callback:
                         progress_callback({'stage': 'embedding', 'podcast': sub, 'episode': {'title': episode.title}})
                     try:
+                        start_time = time.time()
                         embedding = self._generate_embedding(episode.transcript)
                         episode.vector_embedding = json.dumps(embedding.tolist())
+                        embedding_time = time.time() - start_time
                         
-                        # Update Annoy index
-                        if self.annoy_index is None:
-                            self._init_annoy_index()
-                        
-                        idx = len(self.episode_map)
-                        self.episode_map[idx] = episode.id
-                        self.annoy_index.add_item(idx, embedding)
-                        self.annoy_index.build(self.config.annoy_n_trees)
-                        self.annoy_index.save(self.config.annoy_index_path)
+                        if progress_callback:
+                            progress_callback({
+                                'stage': 'timing',
+                                'message': f'Embedding generation took {embedding_time:.2f} seconds'
+                            })
                     except Exception as e:
                         raise Exception(f"Failed to generate embedding: {str(e)}")
 
@@ -671,6 +685,25 @@ CHANGES MADE:
 
                 self.db.add(episode)
                 self.db.commit()
+                
+                # Rebuild Annoy index after successful episode processing
+                if episode.vector_embedding:
+                    try:
+                        start_time = time.time()
+                        self._init_annoy_index(force_rebuild=True)
+                        index_time = time.time() - start_time
+                        
+                        if progress_callback:
+                            progress_callback({
+                                'stage': 'timing',
+                                'message': f'Index rebuild took {index_time:.2f} seconds'
+                            })
+                    except Exception as e:
+                        if progress_callback:
+                            progress_callback({
+                                'stage': 'error',
+                                'message': f'Failed to rebuild search index: {str(e)}'
+                            })
 
     def _find_relevant_excerpt(self, query: str, transcript: str, context_chars: int = 150) -> str:
         """Find the most relevant excerpt from the transcript for the given query.
