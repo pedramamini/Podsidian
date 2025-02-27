@@ -107,11 +107,16 @@ def show_config():
         ('model', config.openrouter_model),
         ('processing_model', config.openrouter_processing_model),
         ('topic_sample_size', config.topic_sample_size),
-        ('prompt', config.openrouter_prompt),
-        ('value_prompt_enabled', config.value_prompt_enabled),
-        ('value_prompt', config.value_prompt)
+        ('prompt', config.openrouter_prompt)
     ]
     print_section('OpenRouter', openrouter_items)
+    
+    # Value Analysis Settings
+    value_items = [
+        ('enabled', config.value_prompt_enabled),
+        ('prompt', config.value_prompt)
+    ]
+    print_section('Value Analysis', value_items)
     
     # Database Settings
     db_items = [
