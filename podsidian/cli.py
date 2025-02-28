@@ -1,5 +1,6 @@
 import os
 import click
+from tqdm import tqdm
 import shutil
 from pathlib import Path
 from sqlalchemy import create_engine
@@ -447,6 +448,119 @@ def search(query, relevance, refresh):
                 click.echo(f"{click.style('│ ', fg='bright_black')}{result['excerpt']}")
             
     click.echo("\nTip: Use --relevance to adjust the minimum relevance score (0-100)")
+
+@cli.group()
+def markdown():
+    """Manage markdown exports."""
+    pass
+
+@markdown.command(name='list')
+def list_markdown():
+    """List all markdown files in the vault."""
+    from .markdown import list_markdown_files
+    from .core import PodcastProcessor
+    
+    session = get_db_session()
+    processor = PodcastProcessor(session)
+    
+    if not processor.config.vault_path:
+        click.echo("Error: No vault path configured")
+        return
+        
+    files = list_markdown_files(processor.config.vault_path, processor)
+    if not files:
+        click.echo("No markdown files found in vault")
+        return
+        
+    click.echo(f"\nFound {len(files)} markdown files in vault:")
+    for file in files:
+        hash_str = file['file_hash']
+        published_at = file['published_at']
+        date_str = published_at.strftime('%Y-%m-%d') if published_at else 'No Date'
+        # Check if filename starts with YYYY-MM-DD
+        has_date_prefix = file['filename'].startswith(date_str)
+        
+        # Only show date column if it's not already in filename
+        if has_date_prefix:
+            click.echo(
+                f"  {click.style(hash_str, fg='green')} "
+                f"{file['filename']}"
+            )
+        else:
+            click.echo(
+                f"  {click.style(hash_str, fg='green')} "
+                f"[{click.style(date_str, fg='yellow')}] "
+                f"{file['filename']}"
+            )
+
+@markdown.command(name='regenerate')
+@click.argument('file_hash')
+def regenerate_markdown(file_hash):
+    """Regenerate a markdown file.
+    
+    If FILE_HASH is '*', regenerates all markdown files.
+    Otherwise regenerates the specified file by its hash.
+    """
+    from .markdown import list_markdown_files, get_episode_from_filename
+    from .core import PodcastProcessor
+    
+    session = get_db_session()
+    processor = PodcastProcessor(session)
+    
+    if not processor.config.vault_path:
+        click.echo("Error: No vault path configured")
+        return
+    
+    files = list_markdown_files(processor.config.vault_path, processor)
+    if not files:
+        click.echo("No markdown files found in vault")
+        return
+    
+    # Filter files based on hash
+    if file_hash == '*':
+        files_to_process = files
+    else:
+        files_to_process = [f for f in files if f['file_hash'] == file_hash]
+        if not files_to_process:
+            click.echo(f"No markdown file found with hash: {file_hash}")
+            return
+    
+    success = 0
+    if file_hash == '*':
+        click.echo(f"\nRegenerating {len(files_to_process)} markdown files...")
+        with tqdm(total=len(files_to_process)) as pbar:
+            for file in files_to_process:
+                # Get episode
+                episode = get_episode_from_filename(file['filename'], processor)
+                if not episode:
+                    click.echo(f"\nWarning: Could not find episode for {file['filename']}")
+                    continue
+                
+                # Generate markdown
+                markdown = episode.to_markdown()
+                
+                # Write to file
+                filepath = processor.config.vault_path / file['filename']
+                with open(filepath, 'w') as f:
+                    f.write(markdown)
+                success += 1
+                pbar.update(1)
+        click.echo(f"\nSuccessfully regenerated {success} of {len(files_to_process)} files")
+    else:
+        file = files_to_process[0]  # We know there's exactly one file
+        episode = get_episode_from_filename(file['filename'], processor)
+        if not episode:
+            click.echo(f"Warning: Could not find episode for {file['filename']}")
+            return
+        
+        # Generate markdown
+        markdown = episode.to_markdown()
+        
+        # Write to file
+        filepath = processor.config.vault_path / file['filename']
+        with open(filepath, 'w') as f:
+            f.write(markdown)
+        click.echo(f"Successfully regenerated {file['filename']}")
 
 @cli.command()
 @click.argument('episode_id', type=int)
