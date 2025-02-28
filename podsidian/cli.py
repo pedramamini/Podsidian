@@ -501,7 +501,7 @@ def regenerate_markdown(file_hash):
     If FILE_HASH is '*', regenerates all markdown files.
     Otherwise regenerates the specified file by its hash.
     """
-    from .markdown import list_markdown_files, get_episode_from_filename
+    from .markdown import list_markdown_files, get_episode_from_markdown
     from .core import PodcastProcessor
     
     session = get_db_session()
@@ -531,7 +531,8 @@ def regenerate_markdown(file_hash):
         with tqdm(total=len(files_to_process)) as pbar:
             for file in files_to_process:
                 # Get episode
-                episode = get_episode_from_filename(file['filename'], processor)
+                filepath = processor.config.vault_path / file['filename']
+                episode = get_episode_from_markdown(filepath, processor)
                 if not episode:
                     click.echo(f"\nWarning: Could not find episode for {file['filename']}")
                     continue
@@ -548,7 +549,8 @@ def regenerate_markdown(file_hash):
         click.echo(f"\nSuccessfully regenerated {success} of {len(files_to_process)} files")
     else:
         file = files_to_process[0]  # We know there's exactly one file
-        episode = get_episode_from_filename(file['filename'], processor)
+        filepath = processor.config.vault_path / file['filename']
+        episode = get_episode_from_markdown(filepath, processor)
         if not episode:
             click.echo(f"Warning: Could not find episode for {file['filename']}")
             return

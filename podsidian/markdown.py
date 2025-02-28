@@ -47,33 +47,25 @@ def list_markdown_files(vault_path: Path, processor: PodcastProcessor) -> List[d
     # Sort by date (if available) then filename, descending
     return sorted(files, key=lambda x: (x['published_at'] or '0000-00-00', x['filename']), reverse=True)
 
-def get_episode_from_filename(filename: str, processor: PodcastProcessor) -> Optional[Episode]:
-    """Get the episode corresponding to a markdown filename."""
-    # Extract date and title from filename
+def get_episode_from_markdown(filepath: Path, processor: PodcastProcessor) -> Optional[Episode]:
+    """Get the episode corresponding to a markdown file by finding its audio URL."""
     try:
-        date_str = filename[:10]  # YYYY-MM-DD
-        title = filename[11:-3]  # Remove date and .md extension
+        with open(filepath, 'r') as f:
+            content = f.read()
         
-        # Find episode by date and similar title
-        episodes = processor.db.query(Episode).filter(
-            Episode.published_at.cast(str).like(f"{date_str}%")
-        ).all()
+        # Look for audio URL in markdown content
+        # It's typically in a link after 'Listen on Apple Podcasts:'
+        import re
+        match = re.search(r'\[Listen on Apple Podcasts\]\((https://[^)]+)\)', content)
+        if not match:
+            return None
         
-        # Find best match by title similarity
-        best_match = None
-        best_score = 0
-        for episode in episodes:
-            from difflib import SequenceMatcher
-            score = SequenceMatcher(None, 
-                processor._make_safe_filename(episode.title), 
-                title
-            ).ratio()
-            if score > best_score:
-                best_score = score
-                best_match = episode
-                
-        return best_match if best_score > 0.8 else None
-    except Exception:
+        audio_url = match.group(1)
+        
+        # Query database for episode with this audio URL
+        return processor.db.query(Episode).filter(Episode.audio_url == audio_url).first()
+    except Exception as e:
+        print(f"Error reading markdown file: {e}")
         return None
 
 def regenerate_markdown(episode_id: int, processor: PodcastProcessor) -> bool:
