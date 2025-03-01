@@ -537,14 +537,12 @@ def regenerate_markdown(file_hash):
                     click.echo(f"\nWarning: Could not find episode for {file['filename']}")
                     continue
                 
-                # Generate markdown
-                markdown = episode.to_markdown()
-                
-                # Write to file
-                filepath = processor.config.vault_path / file['filename']
-                with open(filepath, 'w') as f:
-                    f.write(markdown)
-                success += 1
+                # Generate markdown using the processor's method
+                try:
+                    processor._write_to_obsidian(episode)
+                    success += 1
+                except Exception as e:
+                    click.echo(f"\nError regenerating {file['filename']}: {str(e)}")
                 pbar.update(1)
         click.echo(f"\nSuccessfully regenerated {success} of {len(files_to_process)} files")
     else:
@@ -555,14 +553,12 @@ def regenerate_markdown(file_hash):
             click.echo(f"Warning: Could not find episode for {file['filename']}")
             return
         
-        # Generate markdown
-        markdown = episode.to_markdown()
-        
-        # Write to file
-        filepath = processor.config.vault_path / file['filename']
-        with open(filepath, 'w') as f:
-            f.write(markdown)
-        click.echo(f"Successfully regenerated {file['filename']}")
+        # Generate markdown using the processor's method
+        try:
+            processor._write_to_obsidian(episode)
+            click.echo(f"Successfully regenerated {file['filename']}")
+        except Exception as e:
+            click.echo(f"Error regenerating {file['filename']}: {str(e)}")
 
 @cli.command()
 @click.argument('episode_id', type=int)
