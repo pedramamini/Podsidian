@@ -31,10 +31,10 @@ class PodcastProcessor:
             import torch
             import warnings
             import whisper
-            
+
             # Set tokenizers parallelism
             os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-            
+
             if hasattr(self, '_progress_callback') and self._debug:
                 self._progress_callback({
                     'stage': 'debug',
@@ -66,7 +66,7 @@ class PodcastProcessor:
                 self.config.whisper_model,
                 device=device
             )
-            
+
             if hasattr(self, '_progress_callback') and self._debug:
                 self._progress_callback({
                     'stage': 'debug',
@@ -75,7 +75,7 @@ class PodcastProcessor:
 
     def _load_embedding_model(self):
         """Lazy load sentence transformer model.
-        
+
         Uses a powerful multilingual model (paraphrase-multilingual-mpnet-base-v2)
         that's better suited for semantic search and natural language understanding.
         """
@@ -169,10 +169,10 @@ CHANGES MADE:
             }
         )
         response.raise_for_status()
-        
+
         # Parse response
         content = response.json()["choices"][0]["message"]["content"].strip()
-        
+
         # Split into transcript and changes
         parts = content.split("\nCHANGES MADE:")
         if len(parts) == 2:
@@ -181,13 +181,13 @@ CHANGES MADE:
         else:
             corrected_transcript = content
             changes = "No changes reported"
-            
+
         if hasattr(self, '_progress_callback') and self._progress_callback:
             self._progress_callback({
                 'stage': 'transcript_correction',
                 'message': f"Domain Expert: {domain}\nChanges Made:\n{changes}"
             })
-            
+
         return corrected_transcript
 
     def _transcribe_audio(self, audio_path: str, title: str, progress_callback=None, debug: bool = False) -> str:
@@ -195,18 +195,18 @@ CHANGES MADE:
         # Store progress callback and debug flag for use in _load_whisper
         self._progress_callback = progress_callback
         self._debug = debug
-        
+
         self._load_whisper()
 
         # Prepare transcription options
         options = {}
         if self.config.whisper_language:
             options['language'] = self.config.whisper_language
-            
+
         # Set number of threads for transcription
         if hasattr(self.config, 'num_threads'):
             options['num_threads'] = self.config.num_threads
-            
+
         if debug and progress_callback:
             progress_callback({
                 'stage': 'debug',
@@ -233,7 +233,7 @@ CHANGES MADE:
                             'stage': 'transcribing_progress',
                             'progress': self.n / self.total if self.total else 0
                         }
-                        
+
                         if debug:
                             elapsed = current_time - self._start_time
                             rate = self.n / elapsed if elapsed > 0 else 0
@@ -244,7 +244,7 @@ CHANGES MADE:
                                 f'elapsed={elapsed:.1f}s | '
                                 f'eta={eta:.1f}s'
                             )
-                            
+
                         self.progress_callback(progress_info)
                         last_update_time[0] = current_time
 
@@ -258,10 +258,10 @@ CHANGES MADE:
                     'stage': 'debug',
                     'message': f'Starting transcription of {os.path.basename(audio_path)}'
                 })
-                
+
             # Get initial transcript from Whisper
             result = self.whisper_model.transcribe(audio_path, **options)
-            
+
             if progress_callback:
                 progress_callback({
                     'stage': 'transcription',
@@ -306,11 +306,11 @@ CHANGES MADE:
 
     def _generate_embedding(self, text: str, normalize: bool = True) -> 'np.ndarray':
         """Generate vector embedding for text.
-        
+
         Args:
             text: Text to generate embedding for
             normalize: Whether to normalize the embedding vector (default: True)
-            
+
         Returns:
             Numpy array representing the text embedding
         """
@@ -347,7 +347,7 @@ CHANGES MADE:
 
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
-        
+
     def _get_value_analysis(self, transcript: str) -> str:
         """Get value analysis using OpenRouter if enabled."""
         if not self.config.value_prompt_enabled or not self.config.openrouter_api_key:
@@ -380,7 +380,7 @@ CHANGES MADE:
         # Remove content within brackets and parentheses
         s = re.sub(r'\s*\[[^\]]*\]\s*', '', s)  # Remove [content]
         s = re.sub(r'\s*\([^\)]*\)\s*', '', s)  # Remove (content)
-        
+
         # Remove or replace unsafe characters
         s = re.sub(r'[<>:"/\\|?*]', '', s)
         # Replace multiple spaces with single space
@@ -390,19 +390,21 @@ CHANGES MADE:
         # Ensure filename isn't too long (max 255 chars including extension)
         return s[:250]
 
-    def _get_podcast_app_url(self, audio_url: str, guid: str = None) -> str:
+    def _get_podcast_app_url(self, audio_url: str, guid: str = None, title: str = None) -> str:
         """Get the podcast:// URL for opening in Apple Podcasts app.
-        
+
         This uses the apple_podcasts module to find the appropriate URL.
         If a GUID is provided, it will be used to look up the podcast in the Apple Podcasts database.
-        
+        If no match is found by GUID, it will try to match by title.
+
         Args:
             audio_url: The audio URL from the episode
             guid: Optional episode GUID to use for lookup in Apple Podcasts database
+            title: Optional episode title to use for lookup in Apple Podcasts database
         """
         from .apple_podcasts import get_podcast_app_url
-        return get_podcast_app_url(audio_url, guid)
-    
+        return get_podcast_app_url(audio_url, guid, title)
+
     def _write_to_obsidian(self, episode: Episode):
         """Write episode transcript and summary to Obsidian vault if configured."""
         vault_path = self.config.vault_path
@@ -425,13 +427,13 @@ CHANGES MADE:
 
         # Get value analysis if enabled
         value_analysis = self._get_value_analysis(episode.transcript) if episode.transcript else ""
-        
+
         # Calculate transcript word count if transcript exists
         transcript_wordcount = len(episode.transcript.split()) if episode.transcript else 0
-        
-        # Extract podcast app URL using both audio URL and GUID
-        podcasts_app_url = self._get_podcast_app_url(episode.audio_url, episode.guid) if episode.audio_url else "https://podcasts.apple.com"
-        
+
+        # Extract podcast app URL using audio URL, GUID, and title
+        podcasts_app_url = self._get_podcast_app_url(episode.audio_url, episode.guid, episode.title) if episode.audio_url else "N/A"
+
         # Format note using template
         note_content = self.config.note_template.format(
             title=episode.title,
@@ -450,7 +452,7 @@ CHANGES MADE:
         md_file = vault_path / filename
         with md_file.open('w') as f:
             f.write(note_content)
-            
+
         # Mark episode as processed
         episode.processed_at = datetime.utcnow()
         self.db.commit()
@@ -502,7 +504,7 @@ CHANGES MADE:
                         )
                         self.db.add(podcast)
                         self.db.commit()
-                    
+
                     # Skip muted podcasts
                     if podcast.muted:
                         if progress_callback:
@@ -598,7 +600,7 @@ CHANGES MADE:
                         published_at=published_at,  # We already have this from earlier
                         audio_url=audio_url
                     )
-                    
+
                     # Add episode to session before setting relationships
                     self.db.add(episode)
                     episode.podcast = podcast
@@ -635,7 +637,7 @@ CHANGES MADE:
                         start_time = time.time()
                         temp_path = self._download_audio(audio_url)
                         download_time = time.time() - start_time
-                        
+
                         if progress_callback:
                             progress_callback({
                                 'stage': 'timing',
@@ -651,7 +653,7 @@ CHANGES MADE:
                         start_time = time.time()
                         episode.transcript = self._transcribe_audio(temp_path, episode.title, progress_callback, debug=debug)
                         transcribe_time = time.time() - start_time
-                        
+
                         if progress_callback:
                             progress_callback({
                                 'stage': 'timing',
@@ -668,7 +670,7 @@ CHANGES MADE:
                         embedding = self._generate_embedding(episode.transcript)
                         episode.vector_embedding = json.dumps(embedding.tolist())
                         embedding_time = time.time() - start_time
-                        
+
                         if progress_callback:
                             progress_callback({
                                 'stage': 'timing',
@@ -708,14 +710,14 @@ CHANGES MADE:
 
                 self.db.add(episode)
                 self.db.commit()
-                
+
                 # Rebuild Annoy index after successful episode processing
                 if episode.vector_embedding:
                     try:
                         start_time = time.time()
                         self._init_annoy_index(force_rebuild=True)
                         index_time = time.time() - start_time
-                        
+
                         if progress_callback:
                             progress_callback({
                                 'stage': 'timing',
@@ -730,32 +732,32 @@ CHANGES MADE:
 
     def _find_relevant_excerpt(self, query: str, transcript: str, context_chars: int = 150) -> str:
         """Find the most relevant excerpt from the transcript for the given query.
-        
+
         Uses keyword matching and surrounding context to find relevant excerpts.
         This is a faster alternative to semantic search for excerpt finding.
-        
+
         Args:
             query: Search query
             transcript: Full transcript text
             context_chars: Number of characters of context to include
-            
+
         Returns:
             Most relevant excerpt from the transcript
         """
         if not transcript:
             return ""
-            
+
         # Use simpler keyword matching for excerpts
         query_terms = query.lower().split()
         transcript_lower = transcript.lower()
-        
+
         # Find positions of query terms
         positions = []
         for term in query_terms:
             pos = transcript_lower.find(term)
             if pos != -1:
                 positions.append(pos)
-        
+
         if not positions:
             # If no exact matches, take a chunk from the beginning
             start = 0
@@ -765,27 +767,27 @@ CHANGES MADE:
             best_pos = max(positions, key=lambda p: sum(1 for pos in positions if abs(pos - p) < 200))
             start = max(0, best_pos - context_chars)
             end = min(len(transcript), best_pos + context_chars)
-        
+
         # Add ellipsis for truncated text
         prefix = "..." if start > 0 else ""
         suffix = "..." if end < len(transcript) else ""
-        
+
         # Get the excerpt and clean it up
         excerpt = transcript[start:end].strip()
-        
+
         # Ensure we don't break in the middle of a word
         if prefix:
             excerpt = excerpt[excerpt.find(" ")+1:]
         if suffix:
             excerpt = excerpt[:excerpt.rfind(" ")]
-            
+
         return prefix + excerpt + suffix
-        
-    
-        
+
+
+
     def _init_annoy_index(self, force_rebuild: bool = False) -> None:
         """Initialize or load the Annoy index.
-        
+
         Args:
             force_rebuild: If True, rebuild the index from scratch using database contents
         """
@@ -794,15 +796,15 @@ CHANGES MADE:
             self._load_embedding_model()
         sample_embedding = self.embedding_model.encode(["sample text"])[0]
         embedding_dim = len(sample_embedding)
-        
+
         # Create new index
         from annoy import AnnoyIndex
         self.annoy_index = AnnoyIndex(embedding_dim, self.config.annoy_metric)
-        
+
         # Load existing index if it exists and we're not forcing a rebuild
         index_path = self.config.annoy_index_path
         episodes_with_embeddings = self.db.query(Episode).filter(Episode.vector_embedding.isnot(None)).all()
-        
+
         if os.path.exists(index_path) and not force_rebuild:
             self.annoy_index.load(index_path)
             # Check if we need to rebuild by comparing episode count
@@ -812,7 +814,7 @@ CHANGES MADE:
                 for idx, episode in enumerate(episodes_with_embeddings):
                     self.episode_map[idx] = episode.id
                 return
-        
+
         # If we get here, we need to rebuild the index
         self.episode_map = {}
         for episode in episodes_with_embeddings:
@@ -820,88 +822,88 @@ CHANGES MADE:
             idx = len(self.episode_map)
             self.episode_map[idx] = episode.id
             self.annoy_index.add_item(idx, np.array(json.loads(episode.vector_embedding)))
-        
+
         # Build and save index
         self.annoy_index.build(self.config.annoy_n_trees)
         self.annoy_index.save(index_path)
-    
+
     def search(self, query: str, limit: int = 10, relevance_threshold: float = 0.60) -> List[Dict]:
         """Search through podcast content using natural language understanding.
-        
+
         This implementation is inspired by Spotify's podcast search, using semantic
         similarity to match content even when exact keywords don't match. It uses
         Annoy for fast approximate nearest neighbor search.
-        
+
         Args:
             query: Natural language search query
             limit: Maximum number of results to return
             relevance_threshold: Minimum similarity score (0.0 to 1.0) for results
-            
+
         Returns:
             List of dicts containing search results above the relevance threshold
         """
         self._load_embedding_model()
-        
+
         # Initialize Annoy index if needed
         if self.annoy_index is None:
             self._init_annoy_index()
-        
+
         # Generate query embedding
         query_embedding = self._generate_embedding(query)
-        
+
         # Get nearest neighbors from Annoy
         n_results = min(limit * 2, self.annoy_index.get_n_items())  # Get extra results for filtering
         indices, distances = self.annoy_index.get_nns_by_vector(
             query_embedding, n_results, include_distances=True)
-        
+
         # Convert distances to similarities (Annoy returns squared L2 distance for 'angular')
         similarities = [1 - (d / 2) for d in distances]  # Convert to cosine similarity
-        
+
         results = []
         for idx, similarity in zip(indices, similarities):
             if similarity < relevance_threshold:
                 continue
-                
+
         # Batch fetch all potential episodes
         episode_ids = [self.episode_map[idx] for idx in indices]
         episodes = {e.id: e for e in self.db.query(Episode).filter(Episode.id.in_(episode_ids)).all()}
-        
+
         for idx, similarity in zip(indices, similarities):
             if similarity < relevance_threshold:
                 continue
-                
+
             # Get episode from cached results
             episode = episodes.get(self.episode_map[idx])
             if not episode:
                 continue
-            
+
             # Get episode metadata
             title = episode.title
             description = episode.description or ''
             podcast_title = episode.podcast.title
-            
+
             # Create rich text representation for better context
             rich_text = f"{podcast_title}. {title}. {description}"
-            
+
             # Boost score if query terms appear in title/description
             query_terms = set(query.lower().split())
             text_terms = set(rich_text.lower().split())
             term_overlap = len(query_terms & text_terms) / len(query_terms)
-            
+
             # Combine semantic and term-based scores
             combined_score = (0.7 * similarity) + (0.3 * term_overlap)
-            
+
             # Only include results above threshold
             if combined_score >= relevance_threshold:
                 # Find most relevant excerpt
                 excerpt = self._find_relevant_excerpt(query, episode.transcript)
-                
+
                 results.append({
                     'episode': episode,
                     'similarity': combined_score,
                     'excerpt': excerpt
                 })
-        
+
         # Sort by combined score and return top results
         results.sort(key=lambda x: x['similarity'], reverse=True)
         return [
