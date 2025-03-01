@@ -421,7 +421,8 @@ CHANGES MADE:
             audio_url=episode.audio_url,
             summary=summary,
             value_analysis=value_analysis,
-            transcript=episode.transcript or "Transcript not available"
+            transcript=episode.transcript or "Transcript not available",
+            episode_id=episode.id
         )
 
         md_file = vault_path / filename

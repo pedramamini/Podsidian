@@ -539,6 +539,7 @@ def regenerate_markdown(file_hash):
                 
                 # Generate markdown using the processor's method
                 try:
+                    click.echo(f"Regenerating: {file['filename']}")
                     processor._write_to_obsidian(episode)
                     success += 1
                 except Exception as e:
@@ -555,6 +556,7 @@ def regenerate_markdown(file_hash):
         
         # Generate markdown using the processor's method
         try:
+            click.echo(f"Regenerating: {file['filename']}")
             processor._write_to_obsidian(episode)
             click.echo(f"Successfully regenerated {file['filename']}")
         except Exception as e:

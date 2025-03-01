@@ -54,22 +54,12 @@ def get_episode_from_markdown(filepath: Path, processor: PodcastProcessor) -> Op
         with open(filepath, 'r') as f:
             content = f.read()
         
-        # Debug: Print the metadata section for inspection
+        # Look for audio URL in markdown content in the metadata section
         import re
-        metadata_match = re.search(r'# Metadata([\s\S]*?)(?=\n#|\Z)', content)
-        if metadata_match:
-            metadata_section = metadata_match.group(1)
-            print(f"Found metadata section:\n{metadata_section}")
-            
-            # Look for URL line specifically
-            url_line = re.search(r'\*\*URL\*\*:\s*(.*?)(?:\n|$)', metadata_section)
-            if url_line:
-                print(f"Found URL line: {url_line.group(0)}")
         
-        # Try to match URL with a more flexible pattern
+        # Try to match URL with a flexible pattern
         match = re.search(r'\*\*URL\*\*:\s*(https?://[^\s\n]+)', content)
         if not match:
-            print("No URL found with standard pattern, trying alternative pattern...")
             # Try an alternative pattern that's more lenient
             match = re.search(r'\*\*URL\*\*:\s*([^\s\n]+)', content)
             
@@ -84,54 +74,32 @@ def get_episode_from_markdown(filepath: Path, processor: PodcastProcessor) -> Op
         print(f"Found audio URL: {audio_url}")
         
         # Query database for episode with this audio URL
-        from sqlalchemy import text
-        # Debug: Print the actual SQL query
         query = processor.db.query(Episode).filter(Episode.audio_url == audio_url)
-        print(f"SQL Query: {query}")
-        
-        # Print the SQL statement
-        from sqlalchemy.dialects import sqlite
-        sql_statement = str(query.statement.compile(dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}))
-        print(f"SQL Statement: {sql_statement}")
         
         episode = query.first()
         if episode:
             print(f"Found matching episode: {episode.title}")
         else:
             print("No matching episode found in database")
-            # Debug: Show a sample episode URL from DB
-            sample = processor.db.query(Episode).first()
-            if sample:
-                print(f"Sample episode URL from DB: {sample.audio_url}")
-                
+            
             # Try a partial match
-            print("Trying partial URL match...")
             # Extract domain part of the URL for partial matching
             domain_match = re.search(r'https?://(?:www\.)?([^/]+)', audio_url)
             if domain_match:
                 domain = domain_match.group(1)
-                print(f"Looking for URLs containing: {domain}")
                 
                 # Query for episodes with URLs containing this domain
                 partial_query = processor.db.query(Episode).filter(Episode.audio_url.like(f"%{domain}%"))
-                partial_sql = str(partial_query.statement.compile(dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}))
-                print(f"Partial match SQL: {partial_sql}")
                 
                 partial_matches = partial_query.all()
                 if partial_matches:
-                    print(f"Found {len(partial_matches)} potential matches:")
-                    for i, ep in enumerate(partial_matches[:3]):  # Show first 3 matches
-                        print(f"  {i+1}. {ep.title}: {ep.audio_url}")
-                    
                     # Use the first match if available
                     episode = partial_matches[0]
-                    print(f"Using first match: {episode.title}")
+                    print(f"Using partial match: {episode.title}")
                     return episode
         return episode
     except Exception as e:
         print(f"Error reading markdown file: {e}")
-        import traceback
-        print(traceback.format_exc())
         return None
 
 def regenerate_markdown(episode_id: int, processor: PodcastProcessor) -> bool:

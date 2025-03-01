@@ -5,13 +5,14 @@
 vault_path = "~/Documents/Obsidian"
 
 # Template for generated notes
-# Available variables: {title}, {podcast_title}, {published_at}, {audio_url}, {summary}, {value_analysis}, {transcript}
+# Available variables: {title}, {podcast_title}, {published_at}, {audio_url}, {summary}, {value_analysis}, {transcript}, {episode_id}
 template = """{title}
 
 # Metadata
 - **Podcast**: {podcast_title}
 - **Published**: {published_at}
 - **URL**: {audio_url}
+- **Episode ID**: {episode_id}
 
 # Summary
 {summary}
