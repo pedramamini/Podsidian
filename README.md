@@ -92,7 +92,7 @@ This creates a config file at `~/.config/podsidian/config.toml`
 vault_path = "~/Documents/Obsidian"
 
 # Template for generated notes
-# Available variables: {title}, {podcast_title}, {published_at}, {audio_url}, {summary}, {value_analysis}, {transcript}
+# Available variables: {title}, {podcast_title}, {published_at}, {audio_url}, {podcasts_app_url}, {summary}, {value_analysis}, {transcript}, {episode_id}, {episode_wordcount}, {podcast_guid}
 template = """
 {title}
 
@@ -100,6 +100,8 @@ template = """
 - **Podcast**: {podcast_title}
 - **Published**: {published_at}
 - **URL**: {audio_url}
+- **Open in Podcasts App**: {podcasts_app_url}
+- **Podcast GUID**: {podcast_guid}
 
 # Summary
 {summary}

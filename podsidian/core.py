@@ -390,6 +390,19 @@ CHANGES MADE:
         # Ensure filename isn't too long (max 255 chars including extension)
         return s[:250]
 
+    def _get_podcast_app_url(self, audio_url: str, guid: str = None) -> str:
+        """Get the podcast:// URL for opening in Apple Podcasts app.
+        
+        This uses the apple_podcasts module to find the appropriate URL.
+        If a GUID is provided, it will be used to look up the podcast in the Apple Podcasts database.
+        
+        Args:
+            audio_url: The audio URL from the episode
+            guid: Optional episode GUID to use for lookup in Apple Podcasts database
+        """
+        from .apple_podcasts import get_podcast_app_url
+        return get_podcast_app_url(audio_url, guid)
+    
     def _write_to_obsidian(self, episode: Episode):
         """Write episode transcript and summary to Obsidian vault if configured."""
         vault_path = self.config.vault_path
@@ -416,17 +429,22 @@ CHANGES MADE:
         # Calculate transcript word count if transcript exists
         transcript_wordcount = len(episode.transcript.split()) if episode.transcript else 0
         
+        # Extract podcast app URL using both audio URL and GUID
+        podcasts_app_url = self._get_podcast_app_url(episode.audio_url, episode.guid) if episode.audio_url else "podcast://"
+        
         # Format note using template
         note_content = self.config.note_template.format(
             title=episode.title,
             podcast_title=episode.podcast.title,
             published_at=episode.published_at.strftime('%Y-%m-%d') if episode.published_at else 'Unknown',
             audio_url=episode.audio_url,
+            podcasts_app_url=podcasts_app_url,
             summary=summary,
             value_analysis=value_analysis,
             transcript=episode.transcript or "Transcript not available",
             episode_id=episode.id,
-            episode_wordcount=transcript_wordcount
+            episode_wordcount=transcript_wordcount,
+            podcast_guid=episode.guid
         )
 
         md_file = vault_path / filename
