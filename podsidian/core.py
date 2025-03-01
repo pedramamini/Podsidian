@@ -430,7 +430,7 @@ CHANGES MADE:
         transcript_wordcount = len(episode.transcript.split()) if episode.transcript else 0
         
         # Extract podcast app URL using both audio URL and GUID
-        podcasts_app_url = self._get_podcast_app_url(episode.audio_url, episode.guid) if episode.audio_url else "podcast://"
+        podcasts_app_url = self._get_podcast_app_url(episode.audio_url, episode.guid) if episode.audio_url else "https://podcasts.apple.com"
         
         # Format note using template
         note_content = self.config.note_template.format(

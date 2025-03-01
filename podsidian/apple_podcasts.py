@@ -71,20 +71,20 @@ def get_podcast_app_url(audio_url: str, guid: str = None) -> str:
     match = re.search(apple_pattern, audio_url)
     if match:
         podcast_id, episode_id = match.groups()
-        return f"podcast://podcasts.apple.com/podcast/id{podcast_id}?i={episode_id}"
+        return f"https://podcasts.apple.com/podcast/id{podcast_id}?i={episode_id}"
     
     # Alternative format: https://podcasts.apple.com/*/podcast/*/id<PODCAST_ID>
     alt_pattern = r'podcasts\.apple\.com/[^/]+/podcast/[^/]+/id(\d+)'
     match = re.search(alt_pattern, audio_url)
     if match:
         podcast_id = match.group(1)
-        return f"podcast://podcasts.apple.com/podcast/id{podcast_id}"
+        return f"https://podcasts.apple.com/podcast/id{podcast_id}"
     
     # If not an Apple Podcasts URL, try to query the database
     try:
         db_path = find_apple_podcast_db()
         if not db_path:
-            return "podcast://"
+            return "https://podcasts.apple.com"
         
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -101,7 +101,7 @@ def get_podcast_app_url(audio_url: str, guid: str = None) -> str:
             results = cursor.fetchall()
             if results and results[0][0] and results[0][1]:
                 podcast_id, episode_id = results[0]
-                return f"podcast://podcasts.apple.com/podcast/id{podcast_id}?i={episode_id}"
+                return f"https://podcasts.apple.com/podcast/id{podcast_id}?i={episode_id}"
         
         # If no GUID or no results from GUID, try with the audio URL
         # Try matching on a significant portion of the URL path
@@ -120,7 +120,7 @@ def get_podcast_app_url(audio_url: str, guid: str = None) -> str:
                 results = cursor.fetchall()
                 if results and results[0][0] and results[0][1]:
                     podcast_id, episode_id = results[0]
-                    return f"podcast://podcasts.apple.com/podcast/id{podcast_id}?i={episode_id}"
+                    return f"https://podcasts.apple.com/podcast/id{podcast_id}?i={episode_id}"
             
             # If still no match, try with domain
             domain_match = re.search(r'https?://(?:www\.)?([^/]+)', audio_url)
@@ -136,13 +136,13 @@ def get_podcast_app_url(audio_url: str, guid: str = None) -> str:
                 results = cursor.fetchall()
                 if results and results[0][0] and results[0][1]:
                     podcast_id, episode_id = results[0]
-                    return f"podcast://podcasts.apple.com/podcast/id{podcast_id}?i={episode_id}"
+                    return f"https://podcasts.apple.com/podcast/id{podcast_id}?i={episode_id}"
         
-        return "podcast://"
+        return "https://podcasts.apple.com"
         
     except sqlite3.Error as e:
         print(f"Error querying Apple Podcasts database: {e}")
-        return "podcast://"
+        return "https://podcasts.apple.com"
     
     finally:
         if 'conn' in locals():
