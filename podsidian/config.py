@@ -17,6 +17,9 @@ DEFAULT_CONFIG = {
         "cpu_only": False,
         "threads": 4
     },
+    "search": {
+        "excerpt_length": 300  # Length of excerpt context in characters
+    },
     "annoy": {
         "index_path": "~/.config/podsidian/annoy.idx",
         "n_trees": 10,  # More trees = better accuracy but slower build
@@ -200,6 +203,11 @@ class Config:
     def value_prompt(self) -> str:
         """Get the configured value prompt template."""
         return self.config["openrouter"]["value_prompt"]
+        
+    @property
+    def search_excerpt_length(self) -> int:
+        """Get the configured search excerpt length in characters."""
+        return self.config["search"]["excerpt_length"]
     
     @property
     def annoy_index_path(self) -> str:

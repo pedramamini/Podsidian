@@ -27,6 +27,13 @@ template = """{title}
 {transcript}
 """
 
+[search]
+# Search configuration options
+
+# Length of context to include in search excerpts (in characters)
+# Larger values will show more context around the matched terms
+excerpt_length = 300
+
 [whisper]
 # Model size to use for transcription
 # Options: tiny, base, small, medium, large, large-v3

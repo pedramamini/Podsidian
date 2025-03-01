@@ -747,7 +747,7 @@ CHANGES MADE:
                                 'message': f'Failed to rebuild search index: {str(e)}'
                             })
 
-    def _find_relevant_excerpt(self, query: str, transcript: str, context_chars: int = 150) -> str:
+    def _find_relevant_excerpt(self, query: str, transcript: str, context_chars: int = None) -> str:
         """Find the most relevant excerpt from the transcript for the given query.
 
         Uses keyword matching and surrounding context to find relevant excerpts.
@@ -763,6 +763,10 @@ CHANGES MADE:
         """
         if not transcript:
             return ""
+            
+        # Use configured excerpt length if not specified
+        if context_chars is None:
+            context_chars = self.config.search_excerpt_length
 
         # Use simpler keyword matching for excerpts
         query_terms = query.lower().split()
