@@ -413,6 +413,9 @@ CHANGES MADE:
         # Get value analysis if enabled
         value_analysis = self._get_value_analysis(episode.transcript) if episode.transcript else ""
         
+        # Calculate transcript word count if transcript exists
+        transcript_wordcount = len(episode.transcript.split()) if episode.transcript else 0
+        
         # Format note using template
         note_content = self.config.note_template.format(
             title=episode.title,
@@ -422,7 +425,8 @@ CHANGES MADE:
             summary=summary,
             value_analysis=value_analysis,
             transcript=episode.transcript or "Transcript not available",
-            episode_id=episode.id
+            episode_id=episode.id,
+            episode_wordcount=transcript_wordcount
         )
 
         md_file = vault_path / filename
