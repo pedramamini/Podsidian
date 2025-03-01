@@ -376,19 +376,36 @@ CHANGES MADE:
         return response.json()["choices"][0]["message"]["content"]
 
     def _make_safe_filename(self, s: str) -> str:
-        """Convert string to a safe filename."""
+        """Convert string to a safe filename that's safe for macOS."""
         # Remove content within brackets and parentheses
         s = re.sub(r'\s*\[[^\]]*\]\s*', '', s)  # Remove [content]
         s = re.sub(r'\s*\([^\)]*\)\s*', '', s)  # Remove (content)
 
-        # Remove or replace unsafe characters
-        s = re.sub(r'[<>:"/\\|?*]', '', s)
+        # Remove or replace unsafe characters for macOS
+        # macOS doesn't allow these characters: /, :, [], |, ^, #
+        # The colon (:) is especially problematic on macOS
+        s = re.sub(r'[<>:"/\\|?*\[\]\|\^#]', '', s)  # Remove all unsafe chars including colon
+        
         # Replace multiple spaces with single space
         s = re.sub(r'\s+', ' ', s)
+        
         # Remove leading/trailing spaces and dots
         s = s.strip('. ')
-        # Ensure filename isn't too long (max 255 chars including extension)
-        return s[:250]
+        
+        # macOS has issues with files starting with a dot (hidden files)
+        if s.startswith('.'):
+            s = 'file_' + s
+            
+        # macOS doesn't like filenames ending with a space
+        s = s.rstrip()
+        
+        # macOS doesn't like filenames that are just a dot
+        if s in ['.', '..'] or not s:
+            s = 'untitled_file'
+            
+        # Ensure filename isn't too long (max 255 bytes in UTF-8 for macOS)
+        # Using 240 to be safe with UTF-8 encoding and extension
+        return s[:240]
 
     def _get_podcast_app_url(self, audio_url: str, guid: str = None, title: str = None) -> str:
         """Get the podcast:// URL for opening in Apple Podcasts app.
