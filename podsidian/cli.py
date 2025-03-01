@@ -2,6 +2,7 @@ import os
 import click
 from tqdm import tqdm
 import shutil
+import uvicorn
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -10,6 +11,7 @@ from datetime import datetime
 from .models import init_db, Podcast
 from .config import config
 from .backup import create_backup, list_backups, find_backup_by_date, restore_backup
+from .api import create_api
 
 # Get default paths
 DEFAULT_DB_PATH = os.path.expanduser("~/.local/share/podsidian/podsidian.db")
