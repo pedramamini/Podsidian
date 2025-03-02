@@ -243,8 +243,11 @@ podsidian search "meditation techniques for beginners" --relevance 75
 # Force refresh of search index before searching
 podsidian search "blockchain" --refresh
 
-# Start the MCP service
+# Start the MCP service (HTTP mode)
 podsidian mcp --port 8080
+
+# Start the MCP service in STDIO mode for AI agent integration
+podsidian mcp --stdio
 
 # Manage database backups
 podsidian backup create           # Create a new backup with timestamp
@@ -318,9 +321,13 @@ This will display:
    - Organizes by podcast/episode
    - Enables semantic search
 
-## MCP Service API
+## MCP Service
 
-RESTful API for AI agent integration:
+Podsidian provides an MCP (Message Control Program) service for AI agent integration with two operating modes:
+
+### HTTP Mode
+
+RESTful API accessible via HTTP:
 
 ```bash
 # Base URL
@@ -333,6 +340,121 @@ GET  /episodes/:id                       # Get episode details and transcript
 GET  /subscriptions                      # List all subscriptions with mute state
 POST /subscriptions/:title/mute          # Mute a podcast subscription
 POST /subscriptions/:title/unmute        # Unmute a podcast subscription
+```
+
+### STDIO Mode
+
+STDIO mode enables direct integration with AI agents like Claude Desktop through standard input/output:
+
+```bash
+# Start in STDIO mode
+podsidian mcp --stdio
+
+# With configuration
+podsidian mcp --stdio --config '{"vaultPath":"/path/to/vault"}'
+```
+
+This mode can be used with tools like Smithery CLI:
+
+```bash
+npx -y @smithery/cli run podsidian-mcp --config '{"vaultPath":"/path/to/vault"}'
+```
+
+The STDIO server exposes the same functionality as the HTTP API but through a JSON-based message protocol over stdin/stdout.
+
+### Claude Desktop Integration
+
+To set up Claude Desktop with Podsidian support:
+
+1. Install Claude Desktop from [Anthropic's website](https://claude.ai/desktop)
+
+2. Open Claude Desktop and go to Settings (gear icon) > Advanced > Custom Tools
+
+3. Click "Add Tool" and configure as follows:
+
+   ```json
+   {
+     "podsidian": {
+       "command": "/Users/pedram/Projects/Podsidian/.venv/bin/podsidian",
+       "args": [
+         "mcp",
+         "--stdio"
+       ]
+     }
+   }
+   ```
+
+4. Click "Save"
+
+5. You can now ask Claude to search your podcast content with queries like:
+   - "Search my podcasts for discussions about artificial intelligence"
+   - "Find podcast episodes about climate change"
+   - "Get the transcript of episode 42"
+
+### Other AI Agent Integrations
+
+Podsidian's STDIO mode can be integrated with any AI agent that supports the STDIO protocol for tools:
+
+#### Using with Smithery CLI
+
+```bash
+npx -y @smithery/cli run podsidian
+```
+
+#### Using with LangChain
+
+```python
+from langchain.tools import StructuredTool
+from langchain.agents import AgentExecutor, create_structured_chat_agent
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+import subprocess
+import json
+
+def search_podcasts(query, limit=10, relevance=25):
+    """Search podcast transcripts using natural language"""
+    cmd = ["podsidian", "mcp", "--stdio"]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    
+    # Send tool call message
+    message = {
+        "type": "tool_call",
+        "data": {
+            "name": "search-semantic",
+            "parameters": {
+                "query": query,
+                "limit": limit,
+                "relevance": relevance
+            },
+            "id": "search-1"
+        }
+    }
+    
+    proc.stdin.write(json.dumps(message) + "\n")
+    proc.stdin.flush()
+    
+    # Read response
+    response = json.loads(proc.stdout.readline())
+    proc.terminate()
+    
+    return response["data"]["result"]
+
+# Create LangChain tool
+podsidian_tool = StructuredTool.from_function(
+    func=search_podcasts,
+    name="search_podcasts",
+    description="Search through podcast transcripts using natural language"
+)
+
+# Create agent with the tool
+llm = ChatOpenAI(model="gpt-4")
+tools = [podsidian_tool]
+prompt = ChatPromptTemplate.from_messages([...])
+agent = create_structured_chat_agent(llm, tools, prompt)
+agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+
+# Run the agent
+agent_executor.invoke({"input": "Find podcast discussions about climate change"})
 ```
 
 ## Requirements

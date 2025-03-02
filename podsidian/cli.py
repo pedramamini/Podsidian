@@ -596,11 +596,26 @@ def export(episode_id):
 
 @cli.command()
 @click.option('--port', default=8080, help='Port to run the MCP service on')
-def mcp(port):
-    """Start the MCP service for AI agent integration."""
+@click.option('--stdio', is_flag=True, help='Run in STDIO mode for direct integration with AI agents')
+def mcp(port, stdio):
+    """Start the MCP service for AI agent integration.
+    
+    Can run as a HTTP server (default) or in STDIO mode for direct integration.
+    """
     session = get_db_session()
     app = create_api(session)
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    
+    if stdio:
+        import sys
+        import asyncio
+        from .stdio_server import run_stdio_server
+        
+        # Run in STDIO mode
+        print("Starting Podsidian MCP Server in STDIO mode...", file=sys.stderr)
+        asyncio.run(run_stdio_server(app))
+    else:
+        # Run as HTTP server
+        uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 
