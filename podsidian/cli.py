@@ -110,6 +110,7 @@ def show_config():
         ('model', config.openrouter_model),
         ('processing_model', config.openrouter_processing_model),
         ('topic_sample_size', config.topic_sample_size),
+        ('cost_tracking_enabled', config.cost_tracking_enabled),
         ('prompt', config.openrouter_prompt)
     ]
     print_section('OpenRouter', openrouter_items)
@@ -383,6 +384,10 @@ def ingest(lookback, debug):
     
     processor.ingest_subscriptions(lookback_days=lookback, progress_callback=show_progress, debug=debug)
     click.echo("\n\nIngestion complete!")
+    
+    # Display cost summary if enabled
+    if cost_tracking_enabled:
+        click.echo("\n" + format_cost_summary())
 
 @cli.command()
 @click.argument('query')
@@ -400,6 +405,12 @@ def search(query, relevance, refresh):
     """
     from .core import PodcastProcessor
     from .models import Podcast, Episode
+    from .cost_tracker import init_cost_tracker, format_cost_summary
+    
+    # Initialize cost tracker if enabled
+    cost_tracking_enabled = config.cost_tracking_enabled
+    if cost_tracking_enabled:
+        init_cost_tracker()
     
     session = get_db_session()
     processor = PodcastProcessor(session)
@@ -450,6 +461,10 @@ def search(query, relevance, refresh):
                 click.echo(f"{click.style('│ ', fg='bright_black')}{result['excerpt']}")
             
     click.echo("\nTip: Use --relevance to adjust the minimum relevance score (0-100)")
+    
+    # Display cost summary if enabled
+    if 'cost_tracking_enabled' in locals() and cost_tracking_enabled:
+        click.echo("\n" + format_cost_summary())
 
 @cli.group()
 def markdown():
@@ -505,7 +520,13 @@ def regenerate_markdown(file_hash):
     """
     from .markdown import list_markdown_files, get_episode_from_markdown
     from .core import PodcastProcessor
+    from .cost_tracker import init_cost_tracker, format_cost_summary
     
+    # Initialize cost tracker if enabled
+    cost_tracking_enabled = config.cost_tracking_enabled
+    if cost_tracking_enabled:
+        init_cost_tracker()
+        
     session = get_db_session()
     processor = PodcastProcessor(session)
     
@@ -548,6 +569,10 @@ def regenerate_markdown(file_hash):
                     click.echo(f"\nError regenerating {file['filename']}: {str(e)}")
                 pbar.update(1)
         click.echo(f"\nSuccessfully regenerated {success} of {len(files_to_process)} files")
+        
+        # Display cost summary if enabled
+        if cost_tracking_enabled:
+            click.echo("\n" + format_cost_summary())
     else:
         file = files_to_process[0]  # We know there's exactly one file
         filepath = processor.config.vault_path / file['filename']
@@ -561,6 +586,10 @@ def regenerate_markdown(file_hash):
             click.echo(f"Regenerating: {file['filename']}")
             processor._write_to_obsidian(episode)
             click.echo(f"Successfully regenerated {file['filename']}")
+            
+            # Display cost summary if enabled
+            if cost_tracking_enabled:
+                click.echo("\n" + format_cost_summary())
         except Exception as e:
             click.echo(f"Error regenerating {file['filename']}: {str(e)}")
 

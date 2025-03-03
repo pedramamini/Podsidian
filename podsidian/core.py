@@ -99,6 +99,9 @@ class PodcastProcessor:
 
     def _detect_topic(self, title: str, transcript_sample: str) -> str:
         """Detect the main topic/domain of the podcast using OpenRouter."""
+        # Import cost tracker here to avoid circular imports
+        from .cost_tracker import track_api_call
+        
         headers = {
             "Authorization": f"Bearer {self.config.openrouter_api_key}",
             "HTTP-Referer": "https://github.com/pedramamini/podsidian",
@@ -126,10 +129,19 @@ Respond with just the domain name, nothing else."""
             }
         )
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
+        response_data = response.json()
+        
+        # Track the cost of this API call if enabled
+        if self.config.cost_tracking_enabled:
+            track_api_call(response_data, self.config.openrouter_processing_model)
+            
+        return response_data["choices"][0]["message"]["content"].strip()
 
     def _correct_transcript(self, transcript: str, domain: str) -> str:
         """Correct transcript using domain-specific knowledge."""
+        # Import cost tracker here to avoid circular imports
+        from .cost_tracker import track_api_call
+        
         headers = {
             "Authorization": f"Bearer {self.config.openrouter_api_key}",
             "HTTP-Referer": "https://github.com/pedramamini/podsidian",
@@ -169,9 +181,14 @@ CHANGES MADE:
             }
         )
         response.raise_for_status()
+        response_data = response.json()
+        
+        # Track the cost of this API call if enabled
+        if self.config.cost_tracking_enabled:
+            track_api_call(response_data, self.config.openrouter_processing_model)
 
         # Parse response
-        content = response.json()["choices"][0]["message"]["content"].strip()
+        content = response_data["choices"][0]["message"]["content"].strip()
 
         # Split into transcript and changes
         parts = content.split("\nCHANGES MADE:")
@@ -327,6 +344,8 @@ CHANGES MADE:
             return "No OpenRouter API key configured. Summary not available."
 
         import requests
+        # Import cost tracker here to avoid circular imports
+        from .cost_tracker import track_api_call
 
         headers = {
             "Authorization": f"Bearer {self.config.openrouter_api_key}",
@@ -346,7 +365,13 @@ CHANGES MADE:
         )
 
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        response_data = response.json()
+        
+        # Track the cost of this API call if enabled
+        if self.config.cost_tracking_enabled:
+            track_api_call(response_data, self.config.openrouter_model)
+            
+        return response_data["choices"][0]["message"]["content"]
 
     def _get_value_analysis(self, transcript: str) -> str:
         """Get value analysis using OpenRouter if enabled."""
@@ -354,6 +379,8 @@ CHANGES MADE:
             return ""
 
         import requests
+        # Import cost tracker here to avoid circular imports
+        from .cost_tracker import track_api_call
 
         headers = {
             "Authorization": f"Bearer {self.config.openrouter_api_key}",
@@ -373,7 +400,13 @@ CHANGES MADE:
         )
 
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        response_data = response.json()
+        
+        # Track the cost of this API call if enabled
+        if self.config.cost_tracking_enabled:
+            track_api_call(response_data, self.config.openrouter_model)
+            
+        return response_data["choices"][0]["message"]["content"]
 
     def _make_safe_filename(self, s: str) -> str:
         """Convert string to a safe filename that's safe for macOS."""

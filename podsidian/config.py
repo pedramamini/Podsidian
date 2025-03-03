@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
         "model": "openai/gpt-4",
         "processing_model": "openai/gpt-4",  # Model for topic detection and transcript correction
         "topic_sample_size": 4000,  # Sample size for topic detection
+        "cost_tracking_enabled": True,  # Enable cost tracking for API calls
         "prompt": """You are a helpful podcast summarizer. 
 Given the following podcast transcript, provide:
 1. A concise 2-3 paragraph summary of the key points
@@ -198,6 +199,11 @@ class Config:
     def value_prompt_enabled(self) -> bool:
         """Whether to include value analysis in the output."""
         return self.config["openrouter"]["value_prompt_enabled"]
+        
+    @property
+    def cost_tracking_enabled(self) -> bool:
+        """Check if cost tracking is enabled."""
+        return self.config["openrouter"].get("cost_tracking_enabled", True)
         
     @property
     def value_prompt(self) -> str:

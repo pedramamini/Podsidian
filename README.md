@@ -4,11 +4,11 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
 
 ## Features
 
-- **Apple Podcast Integration**: 
+- **Apple Podcast Integration**:
   - Automatically extracts and processes your Apple Podcast subscriptions
   - Smart episode filtering with configurable lookback period
   - Easy subscription management and episode listing
-- **RSS Feed Processing**: 
+- **RSS Feed Processing**:
   - Retrieves and parses podcast RSS feeds to discover new episodes
   - Defaults to processing only recent episodes (last 7 days)
   - Configurable lookback period for older episodes
@@ -17,21 +17,26 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
   - Annoy vector index for fast semantic search (inspired by Spotify)
   - Vector embeddings for efficient content discovery
   - Configurable Obsidian markdown export
-- **Efficient Processing**: Downloads and transcribes episodes, then discards audio to save space
+- **Efficient Processing**:
+  - Downloads and transcribes episodes, then discards audio to save space
 - **Smart Transcription Pipeline**:
   - Initial transcription using OpenAI's Whisper
   - Automatic domain detection (e.g., Brazilian Jiu-Jitsu, Quantum Physics)
   - Domain-aware transcript correction for technical terms and jargon
   - High-quality output optimized for each podcast's subject matter
-- **AI-Powered Analysis**: Uses OpenRouter to generate customized summaries and insights
-- **Natural Language Search**: 
+- **AI-Powered Analysis**:
+  - Uses OpenRouter to generate customized summaries and insights
+  - Monitor and report expenses for all AI API calls with detailed breakdowns by model and operation
+- **Natural Language Search**:
   - Fast semantic search powered by Spotify's Annoy library
   - Intelligent search that understands the meaning of your queries
   - Finds relevant content even when exact words don't match
   - Configurable relevance threshold for fine-tuning results
   - Results grouped by podcast with relevant excerpts
-- **Obsidian Integration**: Generates markdown notes with customizable templates
-- **AI Agent Integration**: Exposes an MCP (Message Control Program) service for AI agents
+- **Obsidian Integration**:
+  - Generates markdown notes with customizable templates
+- **AI Agent Integration**:
+  - Exposes an MCP (Message Control Program) service for AI agents
 
 ## Installation
 
@@ -153,6 +158,10 @@ topic_sample_size = 4096
 # Model to use for summarization
 # See https://openrouter.ai/docs for available models
 model = "openai/gpt-4o"
+
+# Enable cost tracking for AI API calls
+# When enabled, displays cost summary after operations that use AI
+cost_tracking_enabled = true
 
 # Prompt template for processing transcripts
 # Available variables: {transcript}
@@ -295,6 +304,7 @@ This will display:
 - Vector index location and size
 - Number of total episodes
 - Number of episodes with embeddings
+- AI cost tracking status
 - Other configuration settings
 
 ## How It Works
@@ -415,7 +425,7 @@ def search_podcasts(query, limit=10, relevance=25):
     """Search podcast transcripts using natural language"""
     cmd = ["podsidian", "mcp", "--stdio"]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    
+
     # Send tool call message
     message = {
         "type": "tool_call",
@@ -429,14 +439,14 @@ def search_podcasts(query, limit=10, relevance=25):
             "id": "search-1"
         }
     }
-    
+
     proc.stdin.write(json.dumps(message) + "\n")
     proc.stdin.flush()
-    
+
     # Read response
     response = json.loads(proc.stdout.readline())
     proc.terminate()
-    
+
     return response["data"]["result"]
 
 # Create LangChain tool
@@ -547,6 +557,9 @@ topic_sample_size = 16000          # Characters to analyze for domain detection
 [search]
 # Default relevance threshold for semantic search (0-100)
 default_relevance = 60
+
+# Length of excerpt to show in search results (in characters)
+excerpt_length = 300
 
 # Override relevance thresholds for specific queries
 relevance_overrides = [
