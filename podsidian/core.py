@@ -97,6 +97,75 @@ class PodcastProcessor:
         temp.close()
         return temp.name
 
+    def _download_transcript(self, transcript_url: str, progress_callback=None) -> str:
+        """Download and process an external transcript.
+
+        Args:
+            transcript_url: URL to the transcript file
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Processed transcript text
+        """
+        if progress_callback:
+            progress_callback({
+                'stage': 'downloading_transcript',
+                'message': f'Downloading external transcript from {transcript_url}'
+            })
+            
+        response = requests.get(transcript_url, timeout=60)
+        response.raise_for_status()
+        content_type = response.headers.get('Content-Type', '').lower()
+        
+        if progress_callback:
+            progress_callback({
+                'stage': 'processing_transcript',
+                'message': f'Processing external transcript (format: {content_type})'
+            })
+        
+        # Process different transcript formats
+        if 'json' in content_type or transcript_url.endswith('.json'):
+            # Try to parse JSON transcript (common format)
+            try:
+                data = response.json()
+                # Handle different JSON transcript formats
+                if isinstance(data, list) and all('text' in item for item in data):
+                    # Format with list of segments with text
+                    return ' '.join(item['text'] for item in data)
+                elif 'transcript' in data:
+                    # Simple format with transcript field
+                    return data['transcript']
+                elif 'results' in data and 'transcripts' in data['results']:
+                    # AWS Transcribe format
+                    return data['results']['transcripts'][0]['transcript']
+                else:
+                    # Unknown format, return the raw text
+                    return json.dumps(data)
+            except json.JSONDecodeError:
+                # If JSON parsing fails, treat as plain text
+                return response.text
+        elif 'text/vtt' in content_type or transcript_url.endswith('.vtt'):
+            # WebVTT format
+            lines = []
+            for line in response.text.splitlines():
+                # Skip WebVTT headers, timestamps, and empty lines
+                if not line.strip() or line.startswith('WEBVTT') or '-->' in line or line[0].isdigit():
+                    continue
+                lines.append(line)
+            return ' '.join(lines)
+        elif 'text/srt' in content_type or transcript_url.endswith('.srt'):
+            # SRT format
+            lines = []
+            for line in response.text.splitlines():
+                # Skip SRT headers, timestamps, and empty lines
+                if not line.strip() or '-->' in line or line[0].isdigit():
+                    continue
+                lines.append(line)
+            return ' '.join(lines)
+        else:
+            # Default to plain text
+            return response.text
+    
     def _detect_topic(self, title: str, transcript_sample: str) -> str:
         """Detect the main topic/domain of the podcast using OpenRouter."""
         # Import cost tracker here to avoid circular imports
@@ -621,11 +690,28 @@ CHANGES MADE:
 
                 # Find audio URL
                 audio_url = None
+                transcript_url = None
+                
+                # Look for audio and transcript links
                 for link in entry.get('links', []):
-                    if link.get('type', '').startswith('audio/'):
+                    link_type = link.get('type', '').lower()
+                    if link_type.startswith('audio/'):
                         audio_url = link['href']
-                        break
-
+                    elif link_type in ['application/json', 'text/vtt', 'text/srt', 'text/plain'] or \
+                         link.get('rel', '') == 'transcript' or \
+                         'transcript' in link.get('href', '').lower():
+                        transcript_url = link['href']
+                
+                # Also check for transcript in enclosures
+                if not transcript_url and 'enclosures' in entry:
+                    for enclosure in entry.get('enclosures', []):
+                        enclosure_type = enclosure.get('type', '').lower()
+                        if enclosure_type in ['application/json', 'text/vtt', 'text/srt', 'text/plain'] or \
+                           'transcript' in enclosure.get('href', '').lower():
+                            transcript_url = enclosure.get('href')
+                            break
+                
+                # Skip if no audio URL found
                 if not audio_url:
                     continue
 
@@ -648,7 +734,8 @@ CHANGES MADE:
                         title=episode_title,
                         description=entry.get('description', ''),
                         published_at=published_at,  # We already have this from earlier
-                        audio_url=audio_url
+                        audio_url=audio_url,
+                        transcript_url=transcript_url
                     )
 
                     # Add episode to session before setting relationships
@@ -696,21 +783,52 @@ CHANGES MADE:
                     except requests.exceptions.RequestException as e:
                         raise Exception(f"Failed to download audio: {str(e)}")
 
-                    # Transcribe
-                    if progress_callback:
-                        progress_callback({'stage': 'transcribing', 'podcast': sub, 'episode': {'title': episode.title}})
-                    try:
-                        start_time = time.time()
-                        episode.transcript = self._transcribe_audio(temp_path, episode.title, progress_callback, debug=debug)
-                        transcribe_time = time.time() - start_time
-
+                    # Check if we have an external transcript URL
+                    if episode.transcript_url:
                         if progress_callback:
                             progress_callback({
-                                'stage': 'timing',
-                                'message': f'Audio transcription took {transcribe_time:.2f} seconds'
+                                'stage': 'external_transcript',
+                                'podcast': sub, 
+                                'episode': {'title': episode.title},
+                                'message': f'Using external transcript from {episode.transcript_url}'
                             })
-                    except Exception as e:
-                        raise Exception(f"Failed to transcribe audio: {str(e)}")
+                        try:
+                            start_time = time.time()
+                            episode.transcript = self._download_transcript(episode.transcript_url, progress_callback)
+                            episode.transcript_source = 'external'
+                            transcript_time = time.time() - start_time
+
+                            if progress_callback:
+                                progress_callback({
+                                    'stage': 'timing',
+                                    'message': f'External transcript processing took {transcript_time:.2f} seconds'
+                                })
+                        except Exception as e:
+                            if progress_callback:
+                                progress_callback({
+                                    'stage': 'warning',
+                                    'message': f'Failed to use external transcript, falling back to Whisper: {str(e)}'
+                                })
+                            # Fall back to Whisper transcription
+                            episode.transcript_url = None
+                    
+                    # If no external transcript or it failed, use Whisper
+                    if not episode.transcript_url:
+                        if progress_callback:
+                            progress_callback({'stage': 'transcribing', 'podcast': sub, 'episode': {'title': episode.title}})
+                        try:
+                            start_time = time.time()
+                            episode.transcript = self._transcribe_audio(temp_path, episode.title, progress_callback, debug=debug)
+                            episode.transcript_source = 'whisper'
+                            transcribe_time = time.time() - start_time
+
+                            if progress_callback:
+                                progress_callback({
+                                    'stage': 'timing',
+                                    'message': f'Audio transcription took {transcribe_time:.2f} seconds'
+                                })
+                        except Exception as e:
+                            raise Exception(f"Failed to transcribe audio: {str(e)}")
 
                     # Generate embedding
                     if progress_callback:

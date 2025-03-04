@@ -20,7 +20,8 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
 - **Efficient Processing**:
   - Downloads and transcribes episodes, then discards audio to save space
 - **Smart Transcription Pipeline**:
-  - Initial transcription using OpenAI's Whisper
+  - Automatic detection and use of external transcripts when available
+  - Fallback to OpenAI's Whisper for transcription when needed
   - Automatic domain detection (e.g., Brazilian Jiu-Jitsu, Quantum Physics)
   - Domain-aware transcript correction for technical terms and jargon
   - High-quality output optimized for each podcast's subject matter
@@ -263,6 +264,20 @@ podsidian backup create           # Create a new backup with timestamp
 podsidian backup list            # List all available backups
 podsidian backup restore 2025-02-24  # Restore from a specific date
 ```
+
+## Database Migration
+
+When upgrading to a new version of Podsidian that includes database schema changes, you can use the included migration script:
+
+```bash
+# Run the database migration script
+python -m podsidian.migrate_db
+
+# Specify a custom database path if needed
+python -m podsidian.migrate_db --db-path /path/to/your/database.db
+```
+
+The migration script will safely add new columns to the database without affecting existing data.
 
 ## Database Backup
 

@@ -313,7 +313,8 @@ def ingest(lookback, debug):
     if lookback > 7:
         click.confirm(f"Warning: Looking back {lookback} days may take a while. Continue?", abort=True)
     
-    click.echo(f"Ingesting episodes from the last {lookback} days...")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    click.echo(f"[{timestamp}] Ingesting episodes from the last {lookback} days...")
     
     # Track current podcast and episode progress
     current_podcast = None
@@ -383,7 +384,8 @@ def ingest(lookback, debug):
             click.echo(f"  {click.style('✗', fg='red')} {info['error']}")
     
     processor.ingest_subscriptions(lookback_days=lookback, progress_callback=show_progress, debug=debug)
-    click.echo("\n\nIngestion complete!")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    click.echo(f"\n\n[{timestamp}] Ingestion complete!")
     
     # Display cost summary if enabled
     if cost_tracking_enabled:

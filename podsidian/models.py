@@ -29,6 +29,8 @@ class Episode(Base):
     published_at = Column(DateTime)
     audio_url = Column(String(512))
     transcript = Column(Text)
+    transcript_source = Column(String(50))  # Source of transcript: 'whisper', 'external', etc.
+    transcript_url = Column(String(512))  # URL to external transcript if available
     vector_embedding = Column(Text)  # JSON string of vector embedding
     created_at = Column(DateTime, default=datetime.utcnow)
     processed_at = Column(DateTime)  # When the episode was processed and written to Obsidian
