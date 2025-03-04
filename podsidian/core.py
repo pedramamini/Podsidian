@@ -347,6 +347,11 @@ CHANGES MADE:
 
             # Get initial transcript from Whisper
             result = self.whisper_model.transcribe(audio_path, **options)
+            
+            # Track audio duration for cost tracking
+            if self.config.cost_tracking_enabled:
+                from .cost_tracker import track_api_call
+                track_api_call({}, f"whisper/{self.config.whisper_model}", result.get('segments', [{}])[-1].get('end', 0))
 
             if progress_callback:
                 progress_callback({

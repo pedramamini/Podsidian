@@ -19,7 +19,12 @@ logger = logging.getLogger(__name__)
 _local = threading.local()
 
 # Model pricing cache
-_model_pricing = {}
+_model_pricing = {
+    'whisper/large-v3': {
+        'prompt': Decimal('0.0'),  # Free since it's local
+        'completion': Decimal('0.0')  # Free since it's local
+    }
+}
 
 @lru_cache(maxsize=32)
 def get_model_pricing(model_id: str) -> Dict[str, Decimal]:
@@ -72,7 +77,9 @@ def init_cost_tracker():
         "completion_cost": Decimal("0.0"),
         "total_cost": Decimal("0.0"),
         "api_calls": 0,
-        "models_used": {}
+        "models_used": {},
+        "audio_seconds": 0,
+        "audio_cost": Decimal("0.0")
     }
 
 def get_costs() -> Dict[str, Any]:
@@ -81,7 +88,7 @@ def get_costs() -> Dict[str, Any]:
         init_cost_tracker()
     return _local.costs
 
-def track_api_call(response_data: Dict[str, Any], model: str):
+def track_api_call(response_data: Dict[str, Any], model: str, audio_seconds: Optional[float] = None):
     """
     Track the cost of an API call.
     
@@ -138,7 +145,14 @@ def track_api_call(response_data: Dict[str, Any], model: str):
     _local.costs["models_used"][model]["tokens"] += total_tokens
     _local.costs["models_used"][model]["cost"] += total_cost
     
-    logger.debug(f"API call to {model}: {prompt_tokens} prompt tokens, {completion_tokens} completion tokens, ${total_cost:.6f}")
+    # Track audio duration and cost for Whisper
+    if audio_seconds is not None and model.startswith('whisper/'):
+        _local.costs["audio_seconds"] += audio_seconds
+        # Whisper is free since we run it locally
+        _local.costs["audio_cost"] += Decimal("0.0")
+        logger.debug(f"Whisper transcription: {audio_seconds:.1f} seconds of audio processed")
+    else:
+        logger.debug(f"API call to {model}: {prompt_tokens} prompt tokens, {completion_tokens} completion tokens, ${total_cost:.6f}")
 
 def format_cost_summary() -> str:
     """
@@ -157,6 +171,7 @@ def format_cost_summary() -> str:
         f"  Prompt Tokens: {costs['prompt_tokens']}",
         f"  Completion Tokens: {costs['completion_tokens']}",
         f"  Total Tokens: {costs['total_tokens']}",
+        f"  Audio Processed: {costs['audio_seconds']:.1f} seconds",
         f"  Total Cost: ${costs['total_cost']:.6f}"
     ]
     

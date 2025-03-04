@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
+from .cost_tracker import format_cost_summary
 
 from .models import init_db, Podcast
 from .config import config
@@ -343,6 +344,11 @@ def ingest(lookback, debug):
             click.echo(f"Found {total} recent episodes")
             
         elif stage == 'episode_start':
+            # Get initial cost state
+            from .cost_tracker import get_costs
+            initial_costs = get_costs().copy()
+            info['initial_costs'] = initial_costs
+            
             episode = info['episode']
             current = info['current']
             total = info['total']
@@ -373,7 +379,28 @@ def ingest(lookback, debug):
             click.echo(f"  {click.style('→', fg='yellow')} Exporting to Obsidian...")
             
         elif stage == 'episode_complete':
-            click.echo(f"  {click.style('✓', fg='green')} Processing complete")
+            # Calculate cost delta for this episode
+            if config.cost_tracking_enabled and 'initial_costs' in info:
+                from .cost_tracker import get_costs
+                from decimal import Decimal
+                
+                current_costs = get_costs()
+                initial_costs = info['initial_costs']
+                
+                # Calculate deltas
+                audio_delta = current_costs['audio_seconds'] - initial_costs['audio_seconds']
+                token_delta = current_costs['total_tokens'] - initial_costs['total_tokens']
+                cost_delta = current_costs['total_cost'] - initial_costs['total_cost']
+                
+                # Show cost summary for this episode
+                click.echo(f"  {click.style('✓', fg='green')} Processing complete")
+                click.echo(f"    {click.style('Audio:', fg='bright_black')} {audio_delta:.1f} seconds")
+                if token_delta > 0:
+                    click.echo(f"    {click.style('Tokens:', fg='bright_black')} {token_delta:,}")
+                if cost_delta > Decimal('0'):
+                    click.echo(f"    {click.style('Cost:', fg='bright_black')} ${cost_delta:.6f}")
+            else:
+                click.echo(f"  {click.style('✓', fg='green')} Processing complete")
             
         elif stage == 'debug':
             click.echo(f"  {click.style('🔍', fg='bright_black')} {info['message']}")
@@ -391,7 +418,7 @@ def ingest(lookback, debug):
     click.echo(f"\n\n[{timestamp}] Ingestion complete!")
     
     # Display cost summary if enabled
-    if cost_tracking_enabled:
+    if config.cost_tracking_enabled:
         click.echo("\n" + format_cost_summary())
 
 @cli.command()
