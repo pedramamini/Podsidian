@@ -815,6 +815,10 @@ CHANGES MADE:
                     # If no external transcript or it failed, use Whisper
                     if not episode.transcript_url:
                         if progress_callback:
+                            progress_callback({
+                                'stage': 'info',
+                                'message': 'No external transcript found, falling back to local transcription'
+                            })
                             progress_callback({'stage': 'transcribing', 'podcast': sub, 'episode': {'title': episode.title}})
                         try:
                             start_time = time.time()

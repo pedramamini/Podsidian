@@ -378,6 +378,9 @@ def ingest(lookback, debug):
         elif stage == 'debug':
             click.echo(f"  {click.style('🔍', fg='bright_black')} {info['message']}")
             
+        elif stage == 'info':
+            click.echo(f"  {click.style('ℹ', fg='blue')} {info['message']}")
+            
         elif stage == 'error':
             # Make sure we're on a new line
             click.echo()
