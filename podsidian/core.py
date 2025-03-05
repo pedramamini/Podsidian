@@ -35,6 +35,15 @@ class PodcastProcessor:
             # Set tokenizers parallelism
             os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
+            # Set ffmpeg path in environment if configured
+            if self.config.ffmpeg_path:
+                os.environ['PATH'] = f"{os.path.dirname(self.config.ffmpeg_path)}:{os.environ.get('PATH', '')}"
+                if hasattr(self, '_progress_callback') and self._debug:
+                    self._progress_callback({
+                        'stage': 'debug',
+                        'message': f'Set ffmpeg path: {self.config.ffmpeg_path}'
+                    })
+
             if hasattr(self, '_progress_callback') and self._debug:
                 self._progress_callback({
                     'stage': 'debug',

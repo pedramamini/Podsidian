@@ -15,7 +15,8 @@ DEFAULT_CONFIG = {
         "model": "large-v3",
         "language": "",
         "cpu_only": False,
-        "threads": 4
+        "threads": 4,
+        "ffmpeg_path": None
     },
     "search": {
         "excerpt_length": 300  # Length of excerpt context in characters
@@ -194,6 +195,10 @@ class Config:
         """Number of threads to use for CPU inference."""
         return self.config["whisper"]["threads"]
     
+    @property
+    def ffmpeg_path(self) -> Optional[str]:
+        """Get the configured path to the ffmpeg executable."""
+        return self.config["whisper"].get("ffmpeg_path")
         
     @property
     def value_prompt_enabled(self) -> bool:

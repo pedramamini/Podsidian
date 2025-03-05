@@ -52,6 +52,11 @@ model = "medium.en"
 # Example: "en" for English, "es" for Spanish, etc.
 language = ""
 
+# Path to ffmpeg executable (optional)
+# If not specified, ffmpeg must be in the system PATH
+# Example: "/opt/homebrew/bin/ffmpeg" or "/usr/bin/ffmpeg"
+ffmpeg_path = ""
+
 # Number of CPU threads to use for transcription
 # For M4 Max, 8 threads provides good performance without overloading
 num_threads = 8
