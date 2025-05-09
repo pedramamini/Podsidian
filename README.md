@@ -36,6 +36,7 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
   - Results grouped by podcast with relevant excerpts
 - **Obsidian Integration**:
   - Generates markdown notes with customizable templates
+  - Filters content by quality rating for focused knowledge management
 - **AI Agent Integration**:
   - Exposes an MCP (Message Control Program) service for AI agents
 
@@ -96,6 +97,10 @@ This creates a config file at `~/.config/podsidian/config.toml`
 [obsidian]
 # Path to your Obsidian vault
 vault_path = "~/Documents/Obsidian"
+
+# Minimum rating required for export to Obsidian (S, A, B, C, D)
+# Only episodes with this rating or higher will be exported
+minimum_rating = "B"
 
 # Template for generated notes
 # Available variables: {title}, {podcast_title}, {published_at}, {audio_url}, {podcasts_app_url}, {summary}, {value_analysis}, {transcript}, {episode_id}, {episode_wordcount}, {podcast_guid}
@@ -178,6 +183,7 @@ Transcript:
 
 # Enable value analysis in output
 # When enabled, each episode will include a Value Per Minute (VPM) analysis
+# This analysis is also used for content filtering based on minimum_rating
 value_prompt_enabled = true
 
 # Value analysis prompt template

@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
     },
     "obsidian": {
         "vault_path": "~/Documents/Obsidian",
+        "minimum_rating": "B",  # Minimum rating required for export (S, A, B, C, D)
         "template": """# {title}
 
 ## Metadata
@@ -146,6 +147,11 @@ class Config:
     def note_template(self) -> str:
         """Get the configured note template."""
         return self.config["obsidian"]["template"]
+        
+    @property
+    def minimum_rating(self) -> str:
+        """Get the minimum rating required for export to Obsidian."""
+        return self.config["obsidian"]["minimum_rating"]
     
     @property
     def openrouter_api_key(self) -> Optional[str]:

@@ -4,6 +4,10 @@
 # Path to your Obsidian vault
 vault_path = "~/Documents/Obsidian"
 
+# Minimum rating required for export to Obsidian (S, A, B, C, D)
+# Only episodes with this rating or higher will be exported
+minimum_rating = "B"
+
 # Template for generated notes
 # Available variables: {title}, {podcast_title}, {published_at}, {audio_url}, {podcasts_app_url}, {summary}, {value_analysis}, {transcript}, {episode_id}, {episode_wordcount}, {podcast_guid}
 template = """{title}

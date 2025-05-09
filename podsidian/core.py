@@ -538,6 +538,45 @@ CHANGES MADE:
         from .apple_podcasts import get_podcast_app_url
         return get_podcast_app_url(audio_url, guid, title)
 
+    def _extract_content_rating(self, value_analysis: str) -> str:
+        """Extract the content rating (S, A, B, C, D) from the value analysis.
+        
+        Returns:
+            A string with the rating tier (S, A, B, C, D) or 'D' if no rating can be found.
+        """
+        if not value_analysis:
+            return "D"  # Default to lowest rating if no value analysis
+            
+        # Try to find the rating in the format "X Tier:" (where X is S, A, B, C, or D)
+        rating_match = re.search(r'([SABCD]) Tier', value_analysis)
+        if rating_match:
+            return rating_match.group(1)
+            
+        # Fallback method - look for any mention of tiers
+        if "S Tier" in value_analysis:
+            return "S"
+        elif "A Tier" in value_analysis:
+            return "A"
+        elif "B Tier" in value_analysis:
+            return "B"
+        elif "C Tier" in value_analysis:
+            return "C"
+        else:
+            return "D"  # Default to lowest rating if no match
+    
+    def _rating_meets_minimum(self, rating: str, minimum_rating: str) -> bool:
+        """Check if the rating meets the minimum required rating.
+        
+        Args:
+            rating: The content rating (S, A, B, C, D)
+            minimum_rating: The minimum required rating (S, A, B, C, D)
+            
+        Returns:
+            True if the rating meets or exceeds the minimum, False otherwise
+        """
+        rating_values = {"S": 5, "A": 4, "B": 3, "C": 2, "D": 1}
+        return rating_values.get(rating, 0) >= rating_values.get(minimum_rating, 0)
+
     def _write_to_obsidian(self, episode: Episode):
         """Write episode transcript and summary to Obsidian vault if configured."""
         vault_path = self.config.vault_path
@@ -550,16 +589,26 @@ CHANGES MADE:
         if not episode.podcast.title:
             raise Exception("Podcast has no title")
 
-        # Create filename: YYYY-MM-DD title
-        date_str = episode.published_at.strftime("%Y-%m-%d") if episode.published_at else "no-date"
-        safe_title = self._make_safe_filename(episode.title)
-        filename = f"{date_str} {safe_title}.md"
-
         # Get AI summary if available
         summary = self._get_summary(episode.transcript) if episode.transcript else ""
 
         # Get value analysis if enabled
         value_analysis = self._get_value_analysis(episode.transcript) if episode.transcript else ""
+        
+        # Check if the content meets the minimum rating requirement
+        content_rating = self._extract_content_rating(value_analysis)
+        if not self._rating_meets_minimum(content_rating, self.config.minimum_rating):
+            if hasattr(self, '_progress_callback'):
+                self._progress_callback({
+                    'stage': 'skipping_export',
+                    'message': f'Skipping export: rating {content_rating} below minimum {self.config.minimum_rating}'
+                })
+            return
+
+        # Create filename: YYYY-MM-DD title
+        date_str = episode.published_at.strftime("%Y-%m-%d") if episode.published_at else "no-date"
+        safe_title = self._make_safe_filename(episode.title)
+        filename = f"{date_str} {safe_title}.md"
 
         # Calculate transcript word count if transcript exists
         transcript_wordcount = len(episode.transcript.split()) if episode.transcript else 0
