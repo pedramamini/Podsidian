@@ -413,6 +413,20 @@ def ingest(lookback, debug):
             click.echo()
             click.echo(f"  {click.style('✗', fg='red')} {info['error']}")
     
+        elif stage == 'retry':
+            click.echo(f"  {click.style('⟳', fg='yellow')} {info['message']}")
+            
+        elif stage == 'summary':
+            # Display summary of failures at the end
+            click.echo()
+            if 'failed_podcasts' in info and info['failed_podcasts']:
+                num_failed = len(info['failed_podcasts'])
+                click.echo(f"  {click.style('⚠', fg='yellow')} {click.style(info['message'], bold=True)}")
+                click.echo("  Failed podcasts:")
+                for i, podcast in enumerate(info['failed_podcasts'], 1):
+                    click.echo(f"    {i}. {podcast}")
+                click.echo("  These podcasts were skipped. Try again later to process them.")
+    
     processor.ingest_subscriptions(lookback_days=lookback, progress_callback=show_progress, debug=debug)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     click.echo(f"\n\n[{timestamp}] Ingestion complete!")

@@ -652,6 +652,12 @@ CHANGES MADE:
                 - episode: dict with episode info (if stage == 'episode')
         """
         from datetime import datetime, timedelta
+        import time
+        import random
+        
+        # Track failures for summary
+        failure_count = 0
+        failed_podcasts = []
         cutoff_date = datetime.now() - timedelta(days=lookback_days)
         subscriptions = get_subscriptions()
 
@@ -708,9 +714,45 @@ CHANGES MADE:
                     })
                 continue
 
-            # Parse feed
-            feed = feedparser.parse(sub['feed_url'])
+            # Parse feed with retry mechanism
+            feed = None
+            max_retries = 3
+            retry_count = 0
             recent_entries = []
+            
+            while retry_count < max_retries:
+                try:
+                    if retry_count > 0 and progress_callback:
+                        progress_callback({
+                            'stage': 'retry',
+                            'podcast': sub,
+                            'message': f"Retry attempt {retry_count}/{max_retries} for {sub['title']}"
+                        })
+                    
+                    # Exponential backoff with jitter
+                    if retry_count > 0:
+                        backoff_time = (2 ** retry_count) + random.uniform(0, 1)
+                        time.sleep(backoff_time)
+                        
+                    feed = feedparser.parse(sub['feed_url'])
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        # All retries failed
+                        failure_count += 1
+                        failed_podcasts.append(sub['title'])
+                        if progress_callback:
+                            progress_callback({
+                                'stage': 'error',
+                                'error': f"Failed to parse feed for {sub['title']} after {max_retries} attempts: {str(e)}"
+                            })
+                        # Continue to next podcast instead of raising exception
+                        break
+            
+            # Skip to next podcast if all retries failed
+            if feed is None:
+                continue
 
             # First pass: collect recent entries
             for entry in feed.entries:
@@ -742,12 +784,16 @@ CHANGES MADE:
                     continue
 
                 # Check for existing episode with autoflush disabled
+                is_existing_episode = False
+                episode = None
+                
                 with self.db.no_autoflush:
                     existing = self.db.query(Episode).filter_by(guid=guid).first()
                     if existing:
                         # If episode exists but hasn't been processed, process it
                         if not existing.processed_at:
                             episode = existing
+                            is_existing_episode = True
                         else:
                             continue
 
@@ -790,21 +836,31 @@ CHANGES MADE:
                         })
                     continue
 
-                # Create new episode
+                # Create new episode or update existing one
                 try:
-                    episode = Episode(
-                        guid=guid,
-                        title=episode_title,
-                        description=entry.get('description', ''),
-                        published_at=published_at,  # We already have this from earlier
-                        audio_url=audio_url,
-                        transcript_url=transcript_url
-                    )
+                    if not is_existing_episode:
+                        episode = Episode(
+                            guid=guid,
+                            title=episode_title,
+                            description=entry.get('description', ''),
+                            published_at=published_at,  # We already have this from earlier
+                            audio_url=audio_url,
+                            transcript_url=transcript_url
+                        )
 
-                    # Add episode to session before setting relationships
-                    self.db.add(episode)
-                    episode.podcast = podcast
-                    episode.podcast_id = podcast.id
+                        # Add episode to session before setting relationships
+                        self.db.add(episode)
+                        episode.podcast = podcast
+                        episode.podcast_id = podcast.id
+                    else:
+                        # Update existing episode with new information if needed
+                        episode.title = episode_title
+                        episode.description = entry.get('description', '')
+                        episode.published_at = published_at
+                        episode.audio_url = audio_url
+                        episode.transcript_url = transcript_url
+                        episode.podcast = podcast
+                        episode.podcast_id = podcast.id
 
                     # Verify the relationship is set
                     if not episode.podcast or not episode.podcast.title:
@@ -830,21 +886,46 @@ CHANGES MADE:
                             'total': len(recent_entries)
                         })
 
-                    # Download audio
+                    # Download audio with retry mechanism
                     if progress_callback:
                         progress_callback({'stage': 'downloading', 'podcast': sub, 'episode': {'title': episode.title}})
-                    try:
-                        start_time = time.time()
-                        temp_path = self._download_audio(audio_url)
-                        download_time = time.time() - start_time
+                    
+                    max_retries = 3
+                    retry_count = 0
+                    temp_path = None
+                    
+                    while retry_count < max_retries:
+                        try:
+                            if retry_count > 0 and progress_callback:
+                                progress_callback({
+                                    'stage': 'retry',
+                                    'message': f"Retry attempt {retry_count}/{max_retries} for downloading audio: {episode.title}"
+                                })
+                            
+                            # Exponential backoff with jitter
+                            if retry_count > 0:
+                                backoff_time = (2 ** retry_count) + random.uniform(0, 1)
+                                time.sleep(backoff_time)
+                                
+                            start_time = time.time()
+                            temp_path = self._download_audio(audio_url)
+                            download_time = time.time() - start_time
 
-                        if progress_callback:
-                            progress_callback({
-                                'stage': 'timing',
-                                'message': f'Audio download took {download_time:.2f} seconds'
-                            })
-                    except requests.exceptions.RequestException as e:
-                        raise Exception(f"Failed to download audio: {str(e)}")
+                            if progress_callback:
+                                progress_callback({
+                                    'stage': 'timing',
+                                    'message': f'Audio download took {download_time:.2f} seconds'
+                                })
+                            break  # Success, exit retry loop
+                            
+                        except requests.exceptions.RequestException as e:
+                            retry_count += 1
+                            if retry_count >= max_retries:
+                                # All retries failed
+                                raise Exception(f"Failed to download audio after {max_retries} attempts: {str(e)}")
+                    
+                    if temp_path is None:
+                        raise Exception("Failed to download audio: Unknown error")
 
                     # Check if we have an external transcript URL
                     if episode.transcript_url:
@@ -941,9 +1022,14 @@ CHANGES MADE:
                             'episode': {'title': episode.title},
                             'error': str(e)
                         })
+                    # Track the episode failure in our summary
+                    failure_count += 1
+                    failed_podcasts.append(f"{sub['title']} - {episode.title}")
                     continue
 
-                self.db.add(episode)
+                # Only add to session if it's a new episode (existing episodes are already in the session)
+                if not is_existing_episode:
+                    self.db.add(episode)
                 self.db.commit()
 
                 # Rebuild Annoy index after successful episode processing
@@ -964,6 +1050,14 @@ CHANGES MADE:
                                 'stage': 'error',
                                 'message': f'Failed to rebuild search index: {str(e)}'
                             })
+        
+        # Report summary of failures at the end
+        if progress_callback and (failure_count > 0):
+            progress_callback({
+                'stage': 'summary',
+                'message': f"Completed with {failure_count} failed podcasts",
+                'failed_podcasts': failed_podcasts
+            })
 
     def _find_relevant_excerpt(self, query: str, transcript: str, context_chars: int = None) -> str:
         """Find the most relevant excerpt from the transcript for the given query.
