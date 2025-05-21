@@ -375,8 +375,19 @@ def ingest(lookback, debug):
         elif stage == 'embedding':
             click.echo(f"  {click.style('→', fg='yellow')} Generating embeddings...")
             
+        elif stage == 'skipping_export':
+            if 'message' in info:
+                message = info['message']
+                click.echo(f"  {click.style('✗', fg='yellow')} {message}")
+                
         elif stage == 'exporting':
-            click.echo(f"  {click.style('→', fg='yellow')} Exporting to Obsidian...")
+            if 'filename' in info and 'path' in info:
+                filename = info['filename']
+                path = info['path']
+                click.echo(f"  {click.style('→', fg='yellow')} Exporting to Obsidian: {click.style(filename, fg='cyan')} → {click.style(path, fg='blue')}")
+            else:
+                vault_path = processor.config.vault_path
+                click.echo(f"  {click.style('→', fg='yellow')} Exporting to Obsidian vault: {click.style(str(vault_path), fg='blue')}...")
             
         elif stage == 'episode_complete':
             # Calculate cost delta for this episode
@@ -416,6 +427,22 @@ def ingest(lookback, debug):
         elif stage == 'retry':
             click.echo(f"  {click.style('⟳', fg='yellow')} {info['message']}")
             
+        elif stage == 'statistics':
+            # Display gathered statistics
+            stats = info['stats']
+            click.echo("\n" + click.style("📊 Processing Statistics:", fg='blue', bold=True))
+            click.echo(f"  {click.style('Podcasts:', fg='bright_black')}")
+            click.echo(f"    {click.style('•', fg='blue')} Seen: {stats['podcasts_seen']}")
+            click.echo(f"    {click.style('•', fg='green')} Processed: {stats['podcasts_processed']}")
+            click.echo(f"    {click.style('•', fg='yellow')} Skipped: {stats['podcasts_skipped']}")
+            click.echo(f"    {click.style('•', fg='red')} Failed: {stats['podcasts_failed']}")
+            
+            click.echo(f"  {click.style('Episodes:', fg='bright_black')}")
+            click.echo(f"    {click.style('•', fg='blue')} Seen: {stats['episodes_seen']}")
+            click.echo(f"    {click.style('•', fg='green')} Processed: {stats['episodes_processed']}")
+            click.echo(f"    {click.style('•', fg='yellow')} Skipped due to rating: {stats['episodes_skipped_rating']}")
+            click.echo(f"    {click.style('•', fg='red')} Failed: {stats['episodes_failed']}")
+    
         elif stage == 'summary':
             # Display summary of failures at the end
             click.echo()

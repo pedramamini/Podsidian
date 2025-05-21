@@ -598,6 +598,10 @@ CHANGES MADE:
         # Check if the content meets the minimum rating requirement
         content_rating = self._extract_content_rating(value_analysis)
         if not self._rating_meets_minimum(content_rating, self.config.minimum_rating):
+            # Track episodes skipped due to low rating
+            if hasattr(self, '_stats') and '_stats' in self.__dict__:
+                self._stats['episodes_skipped_rating'] += 1
+                
             if hasattr(self, '_progress_callback'):
                 self._progress_callback({
                     'stage': 'skipping_export',
@@ -632,6 +636,15 @@ CHANGES MADE:
         )
 
         md_file = vault_path / filename
+        
+        # Report progress with filename
+        if hasattr(self, '_progress_callback'):
+            self._progress_callback({
+                'stage': 'exporting',
+                'filename': filename,
+                'path': str(md_file)
+            })
+            
         with md_file.open('w') as f:
             f.write(note_content)
 
@@ -655,13 +668,28 @@ CHANGES MADE:
         import time
         import random
         
-        # Track failures for summary
+        # Track statistics
+        stats = {
+            'podcasts_seen': 0,           # Total podcasts found in subscriptions
+            'podcasts_processed': 0,      # Successfully processed podcasts
+            'podcasts_skipped': 0,        # Podcasts skipped (e.g., muted)
+            'podcasts_failed': 0,         # Failed podcasts
+            'episodes_seen': 0,           # Total episodes found
+            'episodes_processed': 0,      # Successfully processed episodes
+            'episodes_skipped_rating': 0, # Episodes skipped due to rating
+            'episodes_failed': 0          # Failed episodes
+        }
+        
+        # For summary
         failure_count = 0
         failed_podcasts = []
         cutoff_date = datetime.now() - timedelta(days=lookback_days)
         subscriptions = get_subscriptions()
 
-        # Initial stats
+        # Set initial stats
+        stats['podcasts_seen'] = len(subscriptions)
+        
+        # Share initial stats
         if progress_callback:
             progress_callback({
                 'stage': 'init',
@@ -695,6 +723,7 @@ CHANGES MADE:
 
                     # Skip muted podcasts
                     if podcast.muted:
+                        stats['podcasts_skipped'] += 1
                         if progress_callback:
                             progress_callback({
                                 'stage': 'skip',
@@ -741,6 +770,7 @@ CHANGES MADE:
                     if retry_count >= max_retries:
                         # All retries failed
                         failure_count += 1
+                        stats['podcasts_failed'] += 1
                         failed_podcasts.append(sub['title'])
                         if progress_callback:
                             progress_callback({
@@ -753,6 +783,9 @@ CHANGES MADE:
             # Skip to next podcast if all retries failed
             if feed is None:
                 continue
+                
+            # Track successful podcast processing
+            stats['podcasts_processed'] += 1
 
             # First pass: collect recent entries
             for entry in feed.entries:
@@ -760,6 +793,9 @@ CHANGES MADE:
                 published_at = datetime(*entry.published_parsed[:6]) if 'published_parsed' in entry else None
                 if published_at and published_at >= cutoff_date:
                     recent_entries.append((entry, published_at))
+            
+            # Track total episodes seen
+            stats['episodes_seen'] += len(recent_entries)
 
             # Progress update for episodes
             if progress_callback and recent_entries:
@@ -1031,6 +1067,9 @@ CHANGES MADE:
                 if not is_existing_episode:
                     self.db.add(episode)
                 self.db.commit()
+                
+                # Track successful episode processing
+                stats['episodes_processed'] += 1
 
                 # Rebuild Annoy index after successful episode processing
                 if episode.vector_embedding:
