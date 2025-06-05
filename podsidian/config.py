@@ -49,7 +49,7 @@ DEFAULT_CONFIG = {
         "processing_model": "openai/gpt-4",  # Model for topic detection and transcript correction
         "topic_sample_size": 4000,  # Sample size for topic detection
         "cost_tracking_enabled": True,  # Enable cost tracking for API calls
-        "prompt": """You are a helpful podcast summarizer. 
+        "prompt": """You are a helpful podcast summarizer.
 Given the following podcast transcript, provide:
 1. A concise 2-3 paragraph summary of the key points
 2. A bullet list of the most important takeaways
@@ -113,7 +113,7 @@ class Config:
         self.config_path = os.path.expanduser("~/.config/podsidian/config.toml")
         self.config = DEFAULT_CONFIG.copy()
         self._load_config()
-    
+
     def _load_config(self):
         """Load configuration from file if it exists."""
         if os.path.exists(self.config_path):
@@ -121,14 +121,14 @@ class Config:
                 user_config = tomli.load(f)
                 # Deep merge user config with defaults
                 self._merge_configs(self.config, user_config)
-        
+
         # Override with environment variables if set
         if api_key := os.getenv("PODSIDIAN_OPENROUTER_API_KEY"):
             self.config["openrouter"]["api_key"] = api_key
-            
+
         if vault_path := os.getenv("PODSIDIAN_VAULT_PATH"):
             self.config["obsidian"]["vault_path"] = vault_path
-    
+
     def _merge_configs(self, base: Dict, override: Dict):
         """Deep merge override dict into base dict."""
         for key, value in override.items():
@@ -136,42 +136,42 @@ class Config:
                 self._merge_configs(base[key], value)
             else:
                 base[key] = value
-    
+
     @property
     def vault_path(self) -> Path:
         """Get the configured Obsidian vault path."""
         return Path(os.path.expanduser(self.config["obsidian"]["vault_path"]))
-    
+
     @property
     def note_template(self) -> str:
         """Get the configured note template."""
         return self.config["obsidian"]["template"]
-    
+
     @property
     def openrouter_api_key(self) -> Optional[str]:
         """Get the OpenRouter API key."""
         return self.config["openrouter"]["api_key"]
-    
+
     @property
     def openrouter_model(self) -> str:
         """Get the configured OpenRouter model."""
         return self.config["openrouter"]["model"]
-    
+
     @property
     def openrouter_processing_model(self) -> str:
         """Get model to use for topic detection and transcript correction."""
         return self.config["openrouter"]["processing_model"]
-    
+
     @property
     def topic_sample_size(self) -> int:
         """Get sample size for topic detection."""
         return self.config["openrouter"]["topic_sample_size"]
-    
+
     @property
     def openrouter_prompt(self) -> str:
         """Get the configured prompt template."""
         return self.config["openrouter"]["prompt"]
-    
+
     @property
     def whisper_model(self) -> str:
         """Get the configured Whisper model size."""
@@ -179,63 +179,81 @@ class Config:
         if model not in WHISPER_MODELS:
             raise ValueError(f"Invalid Whisper model: {model}. Must be one of: {', '.join(WHISPER_MODELS)}")
         return model
-    
+
     @property
     def whisper_language(self) -> Optional[str]:
         """Get the configured language for Whisper."""
         return self.config["whisper"]["language"] or None
-    
+
     @property
     def whisper_cpu_only(self) -> bool:
         """Whether to use CPU only for Whisper inference."""
         return self.config["whisper"]["cpu_only"]
-    
+
     @property
     def whisper_threads(self) -> int:
         """Number of threads to use for CPU inference."""
         return self.config["whisper"]["threads"]
-    
+
     @property
     def ffmpeg_path(self) -> Optional[str]:
         """Get the configured path to the ffmpeg executable."""
         return self.config["whisper"].get("ffmpeg_path")
-        
+
     @property
     def value_prompt_enabled(self) -> bool:
         """Whether to include value analysis in the output."""
         return self.config["openrouter"]["value_prompt_enabled"]
-        
+
     @property
     def cost_tracking_enabled(self) -> bool:
         """Check if cost tracking is enabled."""
         return self.config["openrouter"].get("cost_tracking_enabled", True)
-        
+
     @property
     def value_prompt(self) -> str:
         """Get the configured value prompt template."""
         return self.config["openrouter"]["value_prompt"]
-        
+
     @property
     def search_excerpt_length(self) -> int:
         """Get the configured search excerpt length in characters."""
         return self.config["search"]["excerpt_length"]
-    
+
     @property
     def annoy_index_path(self) -> str:
         """Get the configured Annoy index path."""
         path = self.config["annoy"]["index_path"]
         return os.path.expanduser(path)
-    
+
     @property
     def annoy_n_trees(self) -> int:
         """Get the configured number of trees for Annoy index."""
         return self.config["annoy"]["n_trees"]
-    
+
     @property
     def annoy_metric(self) -> str:
         """Get the configured distance metric for Annoy index."""
         return self.config["annoy"]["metric"]
         return self.config["openrouter"]["value_prompt"]
+
+def get_database_session():
+    """Get a database session using the default database path."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from .models import init_db
+
+    # Use the same default path as CLI
+    DEFAULT_DB_PATH = os.path.expanduser("~/.local/share/podsidian/podsidian.db")
+
+    # Ensure directory exists
+    db_dir = os.path.dirname(DEFAULT_DB_PATH)
+    os.makedirs(db_dir, exist_ok=True)
+
+    # Initialize database
+    engine = init_db(DEFAULT_DB_PATH)
+    Session = sessionmaker(bind=engine)
+    return Session()
 
 # Global config instance
 config = Config()
