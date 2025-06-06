@@ -121,17 +121,17 @@ class PodcastProcessor:
                 'stage': 'downloading_transcript',
                 'message': f'Downloading external transcript from {transcript_url}'
             })
-            
+
         response = requests.get(transcript_url, timeout=60)
         response.raise_for_status()
         content_type = response.headers.get('Content-Type', '').lower()
-        
+
         if progress_callback:
             progress_callback({
                 'stage': 'processing_transcript',
                 'message': f'Processing external transcript (format: {content_type})'
             })
-        
+
         # Process different transcript formats
         if 'json' in content_type or transcript_url.endswith('.json'):
             # Try to parse JSON transcript (common format)
@@ -174,12 +174,12 @@ class PodcastProcessor:
         else:
             # Default to plain text
             return response.text
-    
+
     def _detect_topic(self, title: str, transcript_sample: str) -> str:
         """Detect the main topic/domain of the podcast using OpenRouter."""
         # Import cost tracker here to avoid circular imports
         from .cost_tracker import track_api_call
-        
+
         headers = {
             "Authorization": f"Bearer {self.config.openrouter_api_key}",
             "HTTP-Referer": "https://github.com/pedramamini/podsidian",
@@ -208,18 +208,18 @@ Respond with just the domain name, nothing else."""
         )
         response.raise_for_status()
         response_data = response.json()
-        
+
         # Track the cost of this API call if enabled
         if self.config.cost_tracking_enabled:
             track_api_call(response_data, self.config.openrouter_processing_model)
-            
+
         return response_data["choices"][0]["message"]["content"].strip()
 
     def _correct_transcript(self, transcript: str, domain: str) -> str:
         """Correct transcript using domain-specific knowledge."""
         # Import cost tracker here to avoid circular imports
         from .cost_tracker import track_api_call
-        
+
         headers = {
             "Authorization": f"Bearer {self.config.openrouter_api_key}",
             "HTTP-Referer": "https://github.com/pedramamini/podsidian",
@@ -260,7 +260,7 @@ CHANGES MADE:
         )
         response.raise_for_status()
         response_data = response.json()
-        
+
         # Track the cost of this API call if enabled
         if self.config.cost_tracking_enabled:
             track_api_call(response_data, self.config.openrouter_processing_model)
@@ -274,8 +274,57 @@ CHANGES MADE:
             corrected_transcript = parts[0].replace("CORRECTED TRANSCRIPT:\n", "").strip()
             changes = parts[1].strip()
         else:
+            # If the response doesn't follow the expected format, try to extract just the transcript
+            # Look for common patterns that indicate the start of correction metadata
+            correction_indicators = [
+                "\nCHANGES MADE:",
+                "\nChanges made:",
+                "\nCorrections:",
+                "\nModifications:",
+                "\nSummary of changes:",
+                "\nKey corrections:",
+                "\nTranscript corrections involved",
+                "Transcript corrections involved",  # Also check without newline
+                "\nKey corrections:",
+                "\n- List each significant correction",
+                "\n- \"",  # Often corrections start with bullet points and quotes
+                "\nOverall transcription accuracy"
+            ]
+
             corrected_transcript = content
-            changes = "No changes reported"
+            for indicator in correction_indicators:
+                if indicator in content:
+                    corrected_transcript = content.split(indicator)[0].strip()
+                    break
+
+            # Remove any remaining correction headers
+            if corrected_transcript.startswith("CORRECTED TRANSCRIPT:"):
+                corrected_transcript = corrected_transcript.replace("CORRECTED TRANSCRIPT:", "").strip()
+
+            # Additional cleanup: remove any lines that look like correction metadata
+            lines = corrected_transcript.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                line_lower = line.lower().strip()
+                # Skip lines that contain correction metadata patterns
+                if any(pattern in line_lower for pattern in [
+                    'transcript corrections involved',
+                    'key corrections:',
+                    'changes made:',
+                    'corrections largely aimed',
+                    'overall transcription accuracy',
+                    'requiring minimal changes',
+                    'was corrected for',
+                    'replaced "',
+                    'changed for alignment',
+                    'adjusted for scientific',
+                    'full name provided for'
+                ]):
+                    continue
+                cleaned_lines.append(line)
+
+            corrected_transcript = '\n'.join(cleaned_lines).strip()
+            changes = "Response format not as expected"
 
         if hasattr(self, '_progress_callback') and self._progress_callback:
             self._progress_callback({
@@ -356,7 +405,7 @@ CHANGES MADE:
 
             # Get initial transcript from Whisper
             result = self.whisper_model.transcribe(audio_path, **options)
-            
+
             # Track audio duration for cost tracking
             if self.config.cost_tracking_enabled:
                 from .cost_tracker import track_api_call
@@ -449,11 +498,11 @@ CHANGES MADE:
 
         response.raise_for_status()
         response_data = response.json()
-        
+
         # Track the cost of this API call if enabled
         if self.config.cost_tracking_enabled:
             track_api_call(response_data, self.config.openrouter_model)
-            
+
         return response_data["choices"][0]["message"]["content"]
 
     def _get_value_analysis(self, transcript: str) -> str:
@@ -484,11 +533,11 @@ CHANGES MADE:
 
         response.raise_for_status()
         response_data = response.json()
-        
+
         # Track the cost of this API call if enabled
         if self.config.cost_tracking_enabled:
             track_api_call(response_data, self.config.openrouter_model)
-            
+
         return response_data["choices"][0]["message"]["content"]
 
     def _make_safe_filename(self, s: str) -> str:
@@ -501,24 +550,24 @@ CHANGES MADE:
         # macOS doesn't allow these characters: /, :, [], |, ^, #
         # The colon (:) is especially problematic on macOS
         s = re.sub(r'[<>:"/\\|?*\[\]\|\^#]', '', s)  # Remove all unsafe chars including colon
-        
+
         # Replace multiple spaces with single space
         s = re.sub(r'\s+', ' ', s)
-        
+
         # Remove leading/trailing spaces and dots
         s = s.strip('. ')
-        
+
         # macOS has issues with files starting with a dot (hidden files)
         if s.startswith('.'):
             s = 'file_' + s
-            
+
         # macOS doesn't like filenames ending with a space
         s = s.rstrip()
-        
+
         # macOS doesn't like filenames that are just a dot
         if s in ['.', '..'] or not s:
             s = 'untitled_file'
-            
+
         # Ensure filename isn't too long (max 255 bytes in UTF-8 for macOS)
         # Using 240 to be safe with UTF-8 encoding and extension
         return s[:240]
@@ -705,7 +754,7 @@ CHANGES MADE:
                 # Find audio URL
                 audio_url = None
                 transcript_url = None
-                
+
                 # Look for audio and transcript links
                 for link in entry.get('links', []):
                     link_type = link.get('type', '').lower()
@@ -715,7 +764,7 @@ CHANGES MADE:
                          link.get('rel', '') == 'transcript' or \
                          'transcript' in link.get('href', '').lower():
                         transcript_url = link['href']
-                
+
                 # Also check for transcript in enclosures
                 if not transcript_url and 'enclosures' in entry:
                     for enclosure in entry.get('enclosures', []):
@@ -724,7 +773,7 @@ CHANGES MADE:
                            'transcript' in enclosure.get('href', '').lower():
                             transcript_url = enclosure.get('href')
                             break
-                
+
                 # Skip if no audio URL found
                 if not audio_url:
                     continue
@@ -802,7 +851,7 @@ CHANGES MADE:
                         if progress_callback:
                             progress_callback({
                                 'stage': 'external_transcript',
-                                'podcast': sub, 
+                                'podcast': sub,
                                 'episode': {'title': episode.title},
                                 'message': f'Using external transcript from {episode.transcript_url}'
                             })
@@ -825,7 +874,7 @@ CHANGES MADE:
                                 })
                             # Fall back to Whisper transcription
                             episode.transcript_url = None
-                    
+
                     # If no external transcript or it failed, use Whisper
                     if not episode.transcript_url:
                         if progress_callback:
@@ -932,7 +981,7 @@ CHANGES MADE:
         """
         if not transcript:
             return ""
-            
+
         # Use configured excerpt length if not specified
         if context_chars is None:
             context_chars = self.config.search_excerpt_length
