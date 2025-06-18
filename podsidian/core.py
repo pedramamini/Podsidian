@@ -1156,3 +1156,175 @@ CHANGES MADE:
             }
             for r in results[:limit]
         ]
+
+    def ingest_local_file(self, audio_file_path: str, title: str = None, progress_callback=None, debug: bool = False) -> int:
+        """Process a local audio file and add it to the database.
+        
+        Args:
+            audio_file_path: Path to the local audio file
+            title: Optional custom title (defaults to filename without extension)
+            progress_callback: Optional callback for progress updates
+            debug: Enable debug output
+            
+        Returns:
+            Episode ID of the created episode
+        """
+        import mimetypes
+        
+        if progress_callback:
+            progress_callback({'stage': 'validation'})
+            
+        # Validate audio file
+        if not os.path.exists(audio_file_path):
+            raise FileNotFoundError(f"Audio file not found: {audio_file_path}")
+            
+        # Check if it's a supported audio file
+        audio_path = Path(audio_file_path)
+        mime_type, _ = mimetypes.guess_type(audio_file_path)
+        supported_extensions = {'.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac', '.wma'}
+        supported_mime_types = {'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/x-ms-wma'}
+        
+        if audio_path.suffix.lower() not in supported_extensions and (not mime_type or mime_type not in supported_mime_types):
+            raise ValueError(f"Unsupported audio file format. Supported formats: {', '.join(supported_extensions)}")
+            
+        if debug and progress_callback:
+            progress_callback({
+                'stage': 'debug',
+                'message': f'File validation passed. MIME type: {mime_type}, Extension: {audio_path.suffix}'
+            })
+            
+        # Get or create "Local Files" podcast
+        local_podcast = self.db.query(Podcast).filter_by(title="Local Files").first()
+        if not local_podcast:
+            local_podcast = Podcast(
+                title="Local Files",
+                author="Local Audio Files",
+                feed_url="local://files",
+                muted=False
+            )
+            self.db.add(local_podcast)
+            self.db.commit()
+            
+            if debug and progress_callback:
+                progress_callback({
+                    'stage': 'debug',
+                    'message': 'Created "Local Files" podcast container'
+                })
+        
+        # Generate episode metadata
+        if not title:
+            title = audio_path.stem  # Filename without extension
+            
+        # Generate a unique GUID for this local file
+        import hashlib
+        file_stat = os.stat(audio_file_path)
+        guid_data = f"local://{audio_file_path}:{file_stat.st_size}:{file_stat.st_mtime}"
+        guid = f"local:{hashlib.md5(guid_data.encode()).hexdigest()}"
+        
+        # Check if episode already exists
+        existing_episode = self.db.query(Episode).filter_by(guid=guid).first()
+        if existing_episode:
+            if existing_episode.processed_at:
+                raise ValueError(f"Local file already processed: {title} (Episode ID: {existing_episode.id})")
+            else:
+                episode = existing_episode
+        else:
+            # Get file modification time as published date
+            published_at = datetime.fromtimestamp(file_stat.st_mtime)
+            
+            # Create new episode
+            episode = Episode(
+                guid=guid,
+                title=title,
+                description=f"Local audio file: {audio_path.name}",
+                published_at=published_at,
+                audio_url=f"file://{os.path.abspath(audio_file_path)}",
+                transcript_url=None
+            )
+            
+            self.db.add(episode)
+            episode.podcast = local_podcast
+            episode.podcast_id = local_podcast.id
+            
+        if debug and progress_callback:
+            progress_callback({
+                'stage': 'debug',
+                'message': f'Episode metadata: Title="{title}", GUID="{guid}"'
+            })
+            
+        # Track costs if enabled
+        initial_costs = None
+        if self.config.cost_tracking_enabled:
+            from .cost_tracker import get_costs
+            initial_costs = get_costs().copy()
+            
+        try:
+            # Transcribe audio file
+            if progress_callback:
+                progress_callback({'stage': 'transcribing'})
+                
+            episode.transcript = self._transcribe_audio(audio_file_path, title, progress_callback, debug=debug)
+            episode.transcript_source = 'whisper'
+            
+            # Generate embedding
+            if progress_callback:
+                progress_callback({'stage': 'embedding'})
+                
+            embedding = self._generate_embedding(episode.transcript)
+            episode.vector_embedding = json.dumps(embedding.tolist())
+            
+            # Export to Obsidian
+            if progress_callback:
+                progress_callback({'stage': 'exporting'})
+                
+            self._write_to_obsidian(episode)
+            
+            # Commit to database
+            self.db.commit()
+            
+            # Rebuild search index
+            if episode.vector_embedding:
+                try:
+                    self._init_annoy_index(force_rebuild=True)
+                    if debug and progress_callback:
+                        progress_callback({
+                            'stage': 'debug',
+                            'message': 'Search index rebuilt successfully'
+                        })
+                except Exception as e:
+                    if progress_callback:
+                        progress_callback({
+                            'stage': 'info',
+                            'message': f'Warning: Failed to rebuild search index: {str(e)}'
+                        })
+            
+            # Calculate cost summary if enabled
+            cost_summary = {}
+            if self.config.cost_tracking_enabled and initial_costs:
+                from .cost_tracker import get_costs
+                from decimal import Decimal
+                
+                current_costs = get_costs()
+                cost_summary = {
+                    'audio_seconds': current_costs['audio_seconds'] - initial_costs['audio_seconds'],
+                    'tokens': current_costs['total_tokens'] - initial_costs['total_tokens'],
+                    'cost': float(current_costs['total_cost'] - initial_costs['total_cost'])
+                }
+            
+            # Report completion
+            if progress_callback:
+                progress_callback({
+                    'stage': 'complete',
+                    'cost_summary': cost_summary if cost_summary else None
+                })
+                
+            return episode.id
+            
+        except Exception as e:
+            self.db.rollback()
+            if progress_callback:
+                progress_callback({
+                    'stage': 'error',
+                    'error': f"Failed to process local file: {str(e)}"
+                })
+            raise

@@ -40,7 +40,7 @@ def show_config():
     if not os.path.exists(config.config_path):
         click.echo(click.style("\nWarning: No configuration file found!", fg='red', bold=True))
         click.echo(click.style("Run 'podsidian init' to create a default configuration file,", fg='yellow'))
-        click.echo(click.style("then adjust the settings in " + config.config_path + " as needed.\n", fg='yellow'))
+        click.echo(click.style(f"then adjust the settings in {config.config_path} as needed.\n", fg='yellow'))
         return
 
     session = get_db_session()
@@ -421,6 +421,91 @@ def ingest(lookback, debug):
     if config.cost_tracking_enabled:
         click.echo("\n" + format_cost_summary())
 
+@cli.command(name='ingest-local')
+@click.argument('audio_file', type=click.Path(exists=True, readable=True))
+@click.option('--title', help='Custom title for the episode (defaults to filename)')
+@click.option('--debug', is_flag=True, help='Enable debug output')
+def ingest_local(audio_file, title, debug):
+    """Process a local audio file.
+    
+    Transcribes the local audio file and exports it to Obsidian, similar to 
+    how podcast episodes are processed but without requiring Apple Podcasts.
+    
+    Examples:
+        podsidian ingest-local ~/Downloads/meeting.mp3
+        podsidian ingest-local /path/to/audio.wav --title "Team Meeting"
+    """
+    from .core import PodcastProcessor
+    
+    session = get_db_session()
+    processor = PodcastProcessor(session)
+    
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    click.echo(f"[{timestamp}] Processing local audio file: {audio_file}")
+    
+    def show_progress(info):
+        stage = info['stage']
+        
+        if stage == 'validation':
+            click.echo(f"  {click.style('→', fg='yellow')} Validating audio file...")
+            
+        elif stage == 'transcribing':
+            click.echo(f"  {click.style('→', fg='yellow')} Transcribing audio...")
+            
+        elif stage == 'transcribing_progress':
+            progress = info['progress']
+            width = 30
+            filled = int(width * progress)
+            bar = '=' * filled + '-' * (width - filled)
+            percentage = int(progress * 100)
+            click.echo(f"\r  {click.style('→', fg='yellow')} Transcribing: [{bar}] {percentage}%", nl=False)
+            
+        elif stage == 'embedding':
+            click.echo(f"  {click.style('→', fg='yellow')} Generating embeddings...")
+            
+        elif stage == 'exporting':
+            click.echo(f"  {click.style('→', fg='yellow')} Exporting to Obsidian...")
+            
+        elif stage == 'complete':
+            # Calculate cost summary if available
+            if config.cost_tracking_enabled and 'cost_summary' in info:
+                summary = info['cost_summary']
+                click.echo(f"  {click.style('✓', fg='green')} Processing complete")
+                if summary.get('audio_seconds', 0) > 0:
+                    click.echo(f"    {click.style('Audio:', fg='bright_black')} {summary['audio_seconds']:.1f} seconds")
+                if summary.get('tokens', 0) > 0:
+                    click.echo(f"    {click.style('Tokens:', fg='bright_black')} {summary['tokens']:,}")
+                if summary.get('cost', 0) > 0:
+                    click.echo(f"    {click.style('Cost:', fg='bright_black')} ${summary['cost']:.6f}")
+            else:
+                click.echo(f"  {click.style('✓', fg='green')} Processing complete")
+                
+        elif stage == 'debug':
+            if debug:
+                click.echo(f"  {click.style('🔍', fg='bright_black')} {info['message']}")
+                
+        elif stage == 'info':
+            click.echo(f"  {click.style('ℹ', fg='blue')} {info['message']}")
+            
+        elif stage == 'error':
+            click.echo()
+            click.echo(f"  {click.style('✗', fg='red')} {info['error']}")
+    
+    try:
+        episode_id = processor.ingest_local_file(audio_file, title=title, progress_callback=show_progress, debug=debug)
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        click.echo(f"\n[{timestamp}] Local file processing complete!")
+        click.echo(f"Episode ID: {episode_id}")
+        
+        # Display cost summary if enabled
+        if config.cost_tracking_enabled:
+            click.echo("\n" + format_cost_summary())
+            
+    except Exception as e:
+        click.echo(f"\n{click.style('Error:', fg='red', bold=True)} {str(e)}")
+        return
+
 @cli.command()
 @click.argument('query')
 @click.option('--relevance', type=int, default=30, help='Minimum relevance score (0-100) for results')
@@ -485,7 +570,8 @@ def search(query, relevance, refresh):
             # Show episode title and metadata
             date_str = result['published_at'].strftime("%Y-%m-%d") if result['published_at'] else "No date"
             click.echo(f"\n{click.style(result['episode'], bold=True)} ({date_str})")
-            click.echo(f"Relevance: {click.style(f'{result['similarity']}%', fg='green')}")
+            similarity_text = click.style(f"{result['similarity']}%", fg='green')
+            click.echo(f"Relevance: {similarity_text}")
 
             # Show relevant excerpt
             if result.get('excerpt'):
