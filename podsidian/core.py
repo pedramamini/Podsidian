@@ -505,12 +505,21 @@ CHANGES MADE:
 
         return response_data["choices"][0]["message"]["content"]
 
-    def _get_value_analysis(self, transcript: str) -> str:
-        """Get value analysis using OpenRouter if enabled."""
+    def _get_value_analysis(self, transcript: str, episode=None):
+        """Get value analysis using OpenRouter if enabled.
+        
+        Args:
+            transcript: The transcript to analyze
+            episode: Optional Episode object to populate with rating data
+            
+        Returns:
+            Formatted text for display/template use
+        """
         if not self.config.value_prompt_enabled or not self.config.openrouter_api_key:
             return ""
 
         import requests
+        import json as json_module
         # Import cost tracker here to avoid circular imports
         from .cost_tracker import track_api_call
 
@@ -538,7 +547,49 @@ CHANGES MADE:
         if self.config.cost_tracking_enabled:
             track_api_call(response_data, self.config.openrouter_model)
 
-        return response_data["choices"][0]["message"]["content"]
+        raw_content = response_data["choices"][0]["message"]["content"]
+        
+        # Try to parse the JSON response to extract structured data
+        if episode:
+            try:
+                # Parse the JSON response
+                analysis_data = json_module.loads(raw_content)
+                
+                # Extract rating (tier) from "rating:" field, extract just the tier letter
+                if "rating:" in analysis_data:
+                    rating_text = analysis_data["rating:"]
+                    # Extract S/A/B/C/D tier from the rating text
+                    if "S Tier" in rating_text:
+                        episode.rating = "S"
+                    elif "A Tier" in rating_text:
+                        episode.rating = "A"
+                    elif "B Tier" in rating_text:
+                        episode.rating = "B"  
+                    elif "C Tier" in rating_text:
+                        episode.rating = "C"
+                    elif "D Tier" in rating_text:
+                        episode.rating = "D"
+                
+                # Extract quality score
+                if "quality-score" in analysis_data:
+                    try:
+                        episode.quality_score = int(analysis_data["quality-score"])
+                    except (ValueError, TypeError):
+                        episode.quality_score = None
+                
+                # Extract labels
+                if "labels" in analysis_data:
+                    episode.labels = analysis_data["labels"]
+                    
+            except (json_module.JSONDecodeError, KeyError, TypeError) as e:
+                # If parsing fails, just continue without setting the structured data
+                if hasattr(self, '_progress_callback') and self._progress_callback:
+                    self._progress_callback({
+                        'stage': 'warning',
+                        'message': f'Failed to parse value analysis JSON: {str(e)}'
+                    })
+
+        return raw_content
 
     def _make_safe_filename(self, s: str) -> str:
         """Convert string to a safe filename that's safe for macOS."""
@@ -607,8 +658,8 @@ CHANGES MADE:
         # Get AI summary if available
         summary = self._get_summary(episode.transcript) if episode.transcript else ""
 
-        # Get value analysis if enabled
-        value_analysis = self._get_value_analysis(episode.transcript) if episode.transcript else ""
+        # Get value analysis if enabled and populate episode rating data
+        value_analysis = self._get_value_analysis(episode.transcript, episode) if episode.transcript else ""
 
         # Calculate transcript word count if transcript exists
         transcript_wordcount = len(episode.transcript.split()) if episode.transcript else 0
@@ -1156,3 +1207,70 @@ CHANGES MADE:
             }
             for r in results[:limit]
         ]
+
+    def get_podcast_ratings(self, podcast_id: int = None) -> Dict:
+        """Get rating statistics for a podcast or all podcasts.
+        
+        Args:
+            podcast_id: Optional specific podcast ID to analyze
+            
+        Returns:
+            Dict with rating statistics
+        """
+        from sqlalchemy import func, case
+        
+        query = self.db.query(
+            Podcast.id,
+            Podcast.title,
+            func.count(Episode.id).label('total_episodes'),
+            func.count(case([(Episode.rating.isnot(None), 1)])).label('rated_episodes'),
+            func.avg(Episode.quality_score).label('avg_quality_score'),
+            func.count(case([(Episode.rating == 'S', 1)])).label('s_tier'),
+            func.count(case([(Episode.rating == 'A', 1)])).label('a_tier'), 
+            func.count(case([(Episode.rating == 'B', 1)])).label('b_tier'),
+            func.count(case([(Episode.rating == 'C', 1)])).label('c_tier'),
+            func.count(case([(Episode.rating == 'D', 1)])).label('d_tier')
+        ).join(Episode).group_by(Podcast.id, Podcast.title)
+        
+        if podcast_id:
+            query = query.filter(Podcast.id == podcast_id)
+            
+        results = query.all()
+        
+        podcasts = []
+        for result in results:
+            # Calculate weighted average rating (S=5, A=4, B=3, C=2, D=1)
+            total_weighted = (result.s_tier * 5 + result.a_tier * 4 + result.b_tier * 3 + 
+                            result.c_tier * 2 + result.d_tier * 1)
+            weighted_avg = total_weighted / result.rated_episodes if result.rated_episodes > 0 else 0
+            
+            # Determine overall tier based on weighted average
+            if weighted_avg >= 4.5:
+                overall_tier = "S"
+            elif weighted_avg >= 3.5:
+                overall_tier = "A"
+            elif weighted_avg >= 2.5:
+                overall_tier = "B"
+            elif weighted_avg >= 1.5:
+                overall_tier = "C"
+            else:
+                overall_tier = "D"
+            
+            podcasts.append({
+                'id': result.id,
+                'title': result.title,
+                'total_episodes': result.total_episodes,
+                'rated_episodes': result.rated_episodes,
+                'avg_quality_score': round(result.avg_quality_score, 1) if result.avg_quality_score else None,
+                'overall_tier': overall_tier,
+                'weighted_avg': round(weighted_avg, 2),
+                'tier_counts': {
+                    'S': result.s_tier,
+                    'A': result.a_tier,
+                    'B': result.b_tier,
+                    'C': result.c_tier,
+                    'D': result.d_tier
+                }
+            })
+        
+        return podcasts if not podcast_id else (podcasts[0] if podcasts else None)
