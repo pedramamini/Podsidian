@@ -627,10 +627,13 @@ def regenerate_markdown(file_hash):
 
 @cli.command()
 @click.argument('episode_id', type=int)
-def export(episode_id):
+@click.option('--full', is_flag=True, help='Show the complete transcript (default shows truncated version)')
+def export(episode_id, full):
     """Export episode transcript to stdout.
 
     EPISODE_ID is the numeric ID shown in the episodes list (e.g. 42)
+    
+    By default, shows a truncated version of the transcript. Use --full to see the complete transcript.
     """
     session = get_db_session()
     from .models import Episode, Podcast
@@ -652,8 +655,23 @@ def export(episode_id):
         click.echo(click.style(f"Published: {episode.published_at.strftime('%Y-%m-%d')}", fg='bright_black'))
     click.echo("\n" + "=" * 40 + "\n")
 
-    # Print transcript
-    click.echo(episode.transcript)
+    # Print transcript (full or truncated)
+    if full or len(episode.transcript) <= 2000:
+        click.echo(episode.transcript)
+    else:
+        # Show first 2000 characters and indicate truncation
+        truncated_transcript = episode.transcript[:2000]
+        # Try to end at a complete sentence or word boundary
+        last_period = truncated_transcript.rfind('.')
+        last_space = truncated_transcript.rfind(' ')
+        
+        if last_period > 1800:  # If there's a sentence ending near the end
+            truncated_transcript = truncated_transcript[:last_period + 1]
+        elif last_space > 1900:  # Otherwise try to end at a word boundary
+            truncated_transcript = truncated_transcript[:last_space]
+            
+        click.echo(truncated_transcript)
+        click.echo("\n[Transcript continues unchanged]")
 
 @cli.command()
 @click.option('--port', default=8080, help='Port to run the MCP service on')
