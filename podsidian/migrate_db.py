@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Database migration script for Podsidian.
-This script adds new columns to the episodes table for transcript source and URL.
+This script adds new columns to the episodes table for transcript source, URL, and content ratings.
 """
 
 import os
@@ -30,6 +30,21 @@ def migrate_database(db_path):
         click.echo("Adding transcript_url column to episodes table...")
         cursor.execute("ALTER TABLE episodes ADD COLUMN transcript_url VARCHAR(512)")
     
+    # Add rating column if it doesn't exist
+    if 'rating' not in columns:
+        click.echo("Adding rating column to episodes table...")
+        cursor.execute("ALTER TABLE episodes ADD COLUMN rating VARCHAR(10)")
+    
+    # Add quality_score column if it doesn't exist
+    if 'quality_score' not in columns:
+        click.echo("Adding quality_score column to episodes table...")
+        cursor.execute("ALTER TABLE episodes ADD COLUMN quality_score INTEGER")
+    
+    # Add labels column if it doesn't exist
+    if 'labels' not in columns:
+        click.echo("Adding labels column to episodes table...")
+        cursor.execute("ALTER TABLE episodes ADD COLUMN labels TEXT")
+    
     # Set default values for existing records
     click.echo("Setting default values for existing records...")
     cursor.execute("UPDATE episodes SET transcript_source = 'whisper' WHERE transcript IS NOT NULL AND transcript_source IS NULL")
@@ -41,7 +56,7 @@ def migrate_database(db_path):
 @click.command()
 @click.option('--db-path', default=DEFAULT_DB_PATH, help='Path to the database file')
 def main(db_path):
-    """Migrate the Podsidian database to add transcript source and URL columns."""
+    """Migrate the Podsidian database to add transcript source, URL, and content rating columns."""
     db_path = os.path.expanduser(db_path)
     
     if not os.path.exists(db_path):

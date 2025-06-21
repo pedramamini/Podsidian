@@ -32,6 +32,9 @@ class Episode(Base):
     transcript_source = Column(String(50))  # Source of transcript: 'whisper', 'external', etc.
     transcript_url = Column(String(512))  # URL to external transcript if available
     vector_embedding = Column(Text)  # JSON string of vector embedding
+    rating = Column(String(10))  # Episode rating tier: S, A, B, C, or D
+    quality_score = Column(Integer)  # Quality score from 1-100
+    labels = Column(Text)  # Comma-separated content labels
     created_at = Column(DateTime, default=datetime.utcnow)
     processed_at = Column(DateTime)  # When the episode was processed and written to Obsidian
     

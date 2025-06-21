@@ -266,16 +266,86 @@ def unmute(title):
     session.commit()
     click.echo(f"Unmuted podcast: {podcast.title}")
 
+@subscriptions.command()
+@click.option('--sort', type=click.Choice(['tier', 'quality', 'episodes']), default='tier',
+              help='Sort order: tier (by overall tier), quality (by avg quality score), episodes (by episode count)')
+def ratings(sort):
+    """Show subscription ratings based on episode content analysis."""
+    session = get_db_session()
+    from .core import PodcastProcessor
+    
+    processor = PodcastProcessor(session)
+    podcasts = processor.get_podcast_ratings()
+    
+    if not podcasts:
+        click.echo("No podcasts with ratings found.")
+        click.echo("Run 'podsidian ingest' with value analysis enabled to generate ratings.")
+        return
+    
+    # Sort the results
+    if sort == 'tier':
+        # Sort by tier (S highest, D lowest) and then by quality score
+        tier_order = {'S': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1, None: 0}
+        podcasts.sort(key=lambda x: (tier_order.get(x['overall_tier'], 0), x['avg_quality_score'] or 0), reverse=True)
+    elif sort == 'quality':
+        podcasts.sort(key=lambda x: x['avg_quality_score'] or 0, reverse=True)
+    elif sort == 'episodes':
+        podcasts.sort(key=lambda x: x['rated_episodes'], reverse=True)
+    
+    # Display header
+    click.echo(click.style("\nSubscription Ratings Summary", fg='green', bold=True))
+    click.echo("=" * 50)
+    
+    for podcast in podcasts:
+        # Title and overall tier
+        tier_color = {
+            'S': 'bright_green',
+            'A': 'green', 
+            'B': 'yellow',
+            'C': 'red',
+            'D': 'bright_red'
+        }.get(podcast['overall_tier'], 'white')
+        
+        click.echo(f"\n📻 {click.style(podcast['title'], fg='bright_white', bold=True)}")
+        click.echo(f"   Overall: {click.style(podcast['overall_tier'] + ' Tier', fg=tier_color, bold=True)} "
+                  f"(Weighted Avg: {podcast['weighted_avg']})")
+        
+        # Stats
+        click.echo(f"   Episodes: {podcast['rated_episodes']}/{podcast['total_episodes']} rated")
+        if podcast['avg_quality_score']:
+            click.echo(f"   Avg Quality Score: {podcast['avg_quality_score']}/100")
+        
+        # Tier breakdown
+        tier_counts = podcast['tier_counts']
+        if any(tier_counts.values()):
+            tier_parts = []
+            for tier, count in tier_counts.items():
+                if count > 0:
+                    tier_parts.append(f"{tier}:{count}")
+            click.echo(f"   Tier Breakdown: {' | '.join(tier_parts)}")
+    
+    click.echo(f"\n{len(podcasts)} subscriptions analyzed")
+
 @cli.command()
-def episodes():
+@click.option('--ratings', is_flag=True, help='Show content ratings for episodes')
+@click.option('--filter-tier', type=click.Choice(['S', 'A', 'B', 'C', 'D']), help='Filter episodes by rating tier')
+def episodes(ratings, filter_tier):
     """List all downloaded episodes."""
     session = get_db_session()
     from .models import Episode, Podcast
 
-    episodes = session.query(Episode).join(Podcast).order_by(Podcast.title, Episode.published_at.desc()).all()
+    query = session.query(Episode).join(Podcast)
+    
+    # Apply tier filter if specified
+    if filter_tier:
+        query = query.filter(Episode.rating == filter_tier)
+        ratings = True  # Force ratings display when filtering by tier
+    
+    episodes = query.order_by(Podcast.title, Episode.published_at.desc()).all()
 
     if not episodes:
-        click.echo("No episodes found in database.")
+        filter_msg = f" with {filter_tier} tier rating" if filter_tier else ""
+        click.echo(f"No episodes found in database{filter_msg}.")
         return
 
     current_podcast = None
@@ -287,10 +357,35 @@ def episodes():
 
         date_str = episode.published_at.strftime("%Y-%m-%d") if episode.published_at else "No date"
         status = "✓" if episode.transcript else " "
-        # Add episode ID in a visually distinct way
-        click.echo(f"[{status}] {click.style(f'#{episode.id:04d}', fg='bright_blue')} {date_str} - {episode.title}")
+        
+        # Format basic episode info
+        episode_line = f"[{status}] {click.style(f'#{episode.id:04d}', fg='bright_blue')} {date_str} - {episode.title}"
+        
+        # Add rating info if requested or available
+        if ratings and episode.rating:
+            tier_color = {
+                'S': 'bright_green',
+                'A': 'green', 
+                'B': 'yellow',
+                'C': 'red',
+                'D': 'bright_red'
+            }.get(episode.rating, 'white')
+            
+            rating_info = click.style(f"[{episode.rating}]", fg=tier_color, bold=True)
+            if episode.quality_score:
+                rating_info += f" ({episode.quality_score}/100)"
+            episode_line += f" {rating_info}"
+            
+            # Show labels if available
+            if episode.labels:
+                labels = episode.labels[:50] + "..." if len(episode.labels) > 50 else episode.labels
+                episode_line += f"\n     Labels: {click.style(labels, fg='cyan')}"
+        
+        click.echo(episode_line)
 
     click.echo("\nUse 'podsidian export <episode_id>' to export a transcript")
+    if not ratings and not filter_tier:
+        click.echo("Use --ratings to show content ratings or --filter-tier to filter by rating")
     click.echo()
 
 @cli.command()
