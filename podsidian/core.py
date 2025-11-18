@@ -1587,13 +1587,13 @@ CHANGES MADE:
             Podcast.id,
             Podcast.title,
             func.count(Episode.id).label('total_episodes'),
-            func.count(case([(Episode.rating.isnot(None), 1)])).label('rated_episodes'),
+            func.count(case((Episode.rating.isnot(None), 1))).label('rated_episodes'),
             func.avg(Episode.quality_score).label('avg_quality_score'),
-            func.count(case([(Episode.rating == 'S', 1)])).label('s_tier'),
-            func.count(case([(Episode.rating == 'A', 1)])).label('a_tier'), 
-            func.count(case([(Episode.rating == 'B', 1)])).label('b_tier'),
-            func.count(case([(Episode.rating == 'C', 1)])).label('c_tier'),
-            func.count(case([(Episode.rating == 'D', 1)])).label('d_tier')
+            func.count(case((Episode.rating == 'S', 1))).label('s_tier'),
+            func.count(case((Episode.rating == 'A', 1))).label('a_tier'),
+            func.count(case((Episode.rating == 'B', 1))).label('b_tier'),
+            func.count(case((Episode.rating == 'C', 1))).label('c_tier'),
+            func.count(case((Episode.rating == 'D', 1))).label('d_tier')
         ).join(Episode).group_by(Podcast.id, Podcast.title)
         
         if podcast_id:
