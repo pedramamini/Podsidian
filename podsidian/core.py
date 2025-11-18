@@ -5,6 +5,8 @@ import time
 import tempfile
 import feedparser
 import requests
+import subprocess
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
@@ -93,6 +95,103 @@ class PodcastProcessor:
             # and produces higher quality sentence embeddings
             from sentence_transformers import SentenceTransformer
             self.embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
+
+    def _is_whisperkit_available(self) -> bool:
+        """Check if whisperkit-cli is available on the system."""
+        return shutil.which('whisperkit-cli') is not None
+
+    def _transcribe_with_whisperkit(self, audio_path: str, language: Optional[str] = None,
+                                     progress_callback=None, debug: bool = False) -> str:
+        """Transcribe audio using WhisperKit-CLI.
+
+        Args:
+            audio_path: Path to audio file
+            language: Optional language code (e.g., 'en')
+            progress_callback: Optional callback for progress updates
+            debug: Whether to enable debug output
+
+        Returns:
+            Transcribed text
+        """
+        if progress_callback:
+            progress_callback({
+                'stage': 'transcription',
+                'message': 'Using WhisperKit-CLI for transcription (optimized for Apple Silicon)'
+            })
+
+        # Build command
+        cmd = ['whisperkit-cli', 'transcribe', '--audio-path', audio_path]
+
+        # Use model path directly to avoid ambiguity
+        # WhisperKit models are stored in ~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/
+        model_name = self.config.whisper_model
+        model_path = os.path.expanduser(f'~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/openai_whisper-{model_name}')
+
+        # Check if model exists locally, otherwise use --model to download
+        if os.path.exists(model_path):
+            cmd.extend(['--model-path', model_path])
+        else:
+            # Let WhisperKit download the model using repo format
+            cmd.extend(['--model', f'argmaxinc/whisperkit-coreml_whisper-{model_name}'])
+
+        # Add language if specified
+        if language:
+            cmd.extend(['--language', language])
+
+        # Enable verbose mode for debug
+        if debug:
+            cmd.append('--verbose')
+
+        if debug and progress_callback:
+            progress_callback({
+                'stage': 'debug',
+                'message': f'WhisperKit command: {" ".join(cmd)}'
+            })
+
+        try:
+            # Run the command and capture output
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=3600,  # 1 hour timeout for very long files
+                check=True
+            )
+
+            # WhisperKit-CLI outputs the transcript to stdout
+            transcript = result.stdout.strip()
+
+            if progress_callback:
+                progress_callback({
+                    'stage': 'transcription',
+                    'message': f'WhisperKit transcription complete: {len(transcript)} chars'
+                })
+
+            if debug and progress_callback and result.stderr:
+                progress_callback({
+                    'stage': 'debug',
+                    'message': f'WhisperKit stderr: {result.stderr}'
+                })
+
+            return transcript
+
+        except subprocess.TimeoutExpired as e:
+            error_msg = f'WhisperKit transcription timeout after 1 hour'
+            if progress_callback:
+                progress_callback({
+                    'stage': 'error',
+                    'message': error_msg
+                })
+            raise Exception(error_msg) from e
+
+        except subprocess.CalledProcessError as e:
+            error_msg = f'WhisperKit failed: {e.stderr}'
+            if progress_callback:
+                progress_callback({
+                    'stage': 'error',
+                    'message': error_msg
+                })
+            raise Exception(error_msg) from e
 
     def _download_audio(self, url: str) -> str:
         """Download audio file to temporary location."""
@@ -200,6 +299,7 @@ Respond with just the domain name, nothing else."""
             headers=headers,
             json={
                 "model": self.config.openrouter_processing_model,
+                "max_tokens": 16384,  # Allow longer outputs for full transcript correction
                 "messages": [{
                     "role": "user",
                     "content": prompt
@@ -216,17 +316,50 @@ Respond with just the domain name, nothing else."""
         return response_data["choices"][0]["message"]["content"].strip()
 
     def _correct_transcript(self, transcript: str, domain: str) -> str:
-        """Correct transcript using domain-specific knowledge."""
+        """Correct transcript using domain-specific knowledge with chunking for long transcripts."""
         # Import cost tracker here to avoid circular imports
         from .cost_tracker import track_api_call
+
+        chunk_size = self.config.transcript_correction_chunk_size
+
+        # Split transcript into chunks if it's too long
+        chunks = []
+        if len(transcript) <= chunk_size:
+            chunks = [transcript]
+        else:
+            # Split on sentence boundaries to avoid cutting mid-sentence
+            current_pos = 0
+            while current_pos < len(transcript):
+                end_pos = min(current_pos + chunk_size, len(transcript))
+
+                # If not at the end, try to find a sentence boundary
+                if end_pos < len(transcript):
+                    # Look for ". " within the last 500 characters of the chunk
+                    search_start = max(end_pos - 500, current_pos)
+                    last_period = transcript.rfind('. ', search_start, end_pos)
+                    if last_period > current_pos:
+                        end_pos = last_period + 2  # Include the period and space
+
+                chunks.append(transcript[current_pos:end_pos])
+                current_pos = end_pos
 
         headers = {
             "Authorization": f"Bearer {self.config.openrouter_api_key}",
             "HTTP-Referer": "https://github.com/pedramamini/podsidian",
         }
 
-        # Prompt for domain-specific correction
-        prompt = f"""You are a professional transcriptionist with extensive expertise in {domain}. Your task is to correct any technical terms, jargon, or domain-specific language in this transcript that might have been misinterpreted during speech-to-text conversion.
+        corrected_chunks = []
+        all_changes = []
+
+        for i, chunk in enumerate(chunks):
+            if hasattr(self, '_progress_callback') and self._progress_callback and len(chunks) > 1:
+                self._progress_callback({
+                    'stage': 'transcript_correction',
+                    'message': f'Correcting chunk {i+1}/{len(chunks)}...'
+                })
+
+            # Prompt for domain-specific correction
+            prompt = f"""You are a professional transcriptionist with extensive expertise in {domain}. Your task is to correct any technical terms, jargon, or domain-specific language in this transcript that might have been misinterpreted during speech-to-text conversion.
 
 Focus on:
 1. Technical terminology specific to {domain}
@@ -235,7 +368,7 @@ Focus on:
 4. Common terms that might have been confused with domain-specific ones
 
 Transcript:
-{transcript}
+{chunk}
 
 Provide your response in the following format:
 
@@ -247,211 +380,276 @@ CHANGES MADE:
 - Include the original text and what you changed it to
 - If no changes were needed, state that"""
 
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json={
-                "model": self.config.openrouter_processing_model,
-                "messages": [{
-                    "role": "user",
-                    "content": prompt
-                }]
-            }
-        )
-        response.raise_for_status()
-        response_data = response.json()
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": self.config.openrouter_processing_model,
+                    "max_tokens": 16384,  # Allow longer outputs for full transcript correction
+                    "messages": [{
+                        "role": "user",
+                        "content": prompt
+                    }]
+                }
+            )
+            response.raise_for_status()
+            response_data = response.json()
 
-        # Track the cost of this API call if enabled
-        if self.config.cost_tracking_enabled:
-            track_api_call(response_data, self.config.openrouter_processing_model)
+            # Track the cost of this API call if enabled
+            if self.config.cost_tracking_enabled:
+                track_api_call(response_data, self.config.openrouter_processing_model)
 
-        # Parse response
-        content = response_data["choices"][0]["message"]["content"].strip()
+            # Parse response
+            content = response_data["choices"][0]["message"]["content"].strip()
 
-        # Split into transcript and changes
-        parts = content.split("\nCHANGES MADE:")
-        if len(parts) == 2:
-            corrected_transcript = parts[0].replace("CORRECTED TRANSCRIPT:\n", "").strip()
-            changes = parts[1].strip()
-        else:
-            # If the response doesn't follow the expected format, try to extract just the transcript
-            # Look for common patterns that indicate the start of correction metadata
-            correction_indicators = [
-                "\nCHANGES MADE:",
-                "\nChanges made:",
-                "\nCorrections:",
-                "\nModifications:",
-                "\nSummary of changes:",
-                "\nKey corrections:",
-                "\nTranscript corrections involved",
-                "Transcript corrections involved",  # Also check without newline
-                "\nKey corrections:",
-                "\n- List each significant correction",
-                "\n- \"",  # Often corrections start with bullet points and quotes
-                "\nOverall transcription accuracy"
-            ]
+            # Split into transcript and changes
+            parts = content.split("\nCHANGES MADE:")
+            if len(parts) == 2:
+                corrected_transcript = parts[0].replace("CORRECTED TRANSCRIPT:\n", "").strip()
+                changes = parts[1].strip()
+            else:
+                # If the response doesn't follow the expected format, try to extract just the transcript
+                # Look for common patterns that indicate the start of correction metadata
+                correction_indicators = [
+                    "\nCHANGES MADE:",
+                    "\nChanges made:",
+                    "\nCorrections:",
+                    "\nModifications:",
+                    "\nSummary of changes:",
+                    "\nKey corrections:",
+                    "\nTranscript corrections involved",
+                    "Transcript corrections involved",  # Also check without newline
+                    "\nKey corrections:",
+                    "\n- List each significant correction",
+                    "\n- \"",  # Often corrections start with bullet points and quotes
+                    "\nOverall transcription accuracy"
+                ]
 
-            corrected_transcript = content
-            for indicator in correction_indicators:
-                if indicator in content:
-                    corrected_transcript = content.split(indicator)[0].strip()
-                    break
+                corrected_transcript = content
+                for indicator in correction_indicators:
+                    if indicator in content:
+                        corrected_transcript = content.split(indicator)[0].strip()
+                        break
 
-            # Remove any remaining correction headers
-            if corrected_transcript.startswith("CORRECTED TRANSCRIPT:"):
-                corrected_transcript = corrected_transcript.replace("CORRECTED TRANSCRIPT:", "").strip()
+                # Remove any remaining correction headers
+                if corrected_transcript.startswith("CORRECTED TRANSCRIPT:"):
+                    corrected_transcript = corrected_transcript.replace("CORRECTED TRANSCRIPT:", "").strip()
 
-            # Additional cleanup: remove any lines that look like correction metadata
-            lines = corrected_transcript.split('\n')
-            cleaned_lines = []
-            for line in lines:
-                line_lower = line.lower().strip()
-                # Skip lines that contain correction metadata patterns
-                if any(pattern in line_lower for pattern in [
-                    'transcript corrections involved',
-                    'key corrections:',
-                    'changes made:',
-                    'corrections largely aimed',
-                    'overall transcription accuracy',
-                    'requiring minimal changes',
-                    'was corrected for',
-                    'replaced "',
-                    'changed for alignment',
-                    'adjusted for scientific',
-                    'full name provided for'
-                ]):
-                    continue
-                cleaned_lines.append(line)
+                # Additional cleanup: remove any lines that look like correction metadata
+                lines = corrected_transcript.split('\n')
+                cleaned_lines = []
+                for line in lines:
+                    line_lower = line.lower().strip()
+                    # Skip lines that contain correction metadata patterns
+                    if any(pattern in line_lower for pattern in [
+                        'transcript corrections involved',
+                        'key corrections:',
+                        'changes made:',
+                        'corrections largely aimed',
+                        'overall transcription accuracy',
+                        'requiring minimal changes',
+                        'was corrected for',
+                        'replaced "',
+                        'changed for alignment',
+                        'adjusted for scientific',
+                        'full name provided for'
+                    ]):
+                        continue
+                    cleaned_lines.append(line)
 
-            corrected_transcript = '\n'.join(cleaned_lines).strip()
-            changes = "Response format not as expected"
+                corrected_transcript = '\n'.join(cleaned_lines).strip()
+                changes = "Response format not as expected"
 
+            corrected_chunks.append(corrected_transcript)
+            if changes and changes != "No changes were needed" and changes != "Response format not as expected":
+                all_changes.append(f"Chunk {i+1}: {changes}")
+
+        # Combine all corrected chunks
+        final_transcript = ' '.join(corrected_chunks)
+
+        # Report changes
         if hasattr(self, '_progress_callback') and self._progress_callback:
+            changes_summary = '\n'.join(all_changes) if all_changes else "No significant changes made"
             self._progress_callback({
                 'stage': 'transcript_correction',
-                'message': f"Domain Expert: {domain}\nChanges Made:\n{changes}"
+                'message': f"Domain Expert: {domain}\nProcessed {len(chunks)} chunk(s)\nChanges Made:\n{changes_summary}"
             })
 
-        return corrected_transcript
+        return final_transcript
 
     def _transcribe_audio(self, audio_path: str, title: str, progress_callback=None, debug: bool = False) -> str:
-        """Transcribe audio file using whisper with configured options and process with domain expertise."""
+        """Transcribe audio file using whisper with configured options and process with domain expertise.
+
+        Prefers WhisperKit-CLI if available (optimized for Apple Silicon), falls back to Python Whisper.
+        """
         # Store progress callback and debug flag for use in _load_whisper
         self._progress_callback = progress_callback
         self._debug = debug
 
-        self._load_whisper()
-
-        # Prepare transcription options
-        options = {}
-        if self.config.whisper_language:
-            options['language'] = self.config.whisper_language
-
-        # Set number of threads for transcription
-        if hasattr(self.config, 'num_threads'):
-            options['num_threads'] = self.config.num_threads
-
-        if debug and progress_callback:
-            progress_callback({
-                'stage': 'debug',
-                'message': f'Transcription options: {options}'
-            })
-
-        # Create a wrapper for tqdm that updates our progress
-        if progress_callback:
-            from tqdm import tqdm
-            original_tqdm = tqdm.__init__
-            last_update_time = [time.time()]
-
-            def custom_tqdm_init(self, *args, **kwargs):
-                original_tqdm(self, *args, **kwargs)
-                self.progress_callback = progress_callback
-                self._original_update = self.update
-                self._start_time = time.time()
-
-                def custom_update(n=1):
-                    current_time = time.time()
-                    if current_time - last_update_time[0] >= 0.5:
-                        self._original_update(n)
-                        progress_info = {
-                            'stage': 'transcribing_progress',
-                            'progress': self.n / self.total if self.total else 0
-                        }
-
-                        if debug:
-                            elapsed = current_time - self._start_time
-                            rate = self.n / elapsed if elapsed > 0 else 0
-                            eta = (self.total - self.n) / rate if rate > 0 else 0
-                            progress_info['debug'] = (
-                                f'frames={self.n}/{self.total} | '
-                                f'rate={rate:.1f} frames/s | '
-                                f'elapsed={elapsed:.1f}s | '
-                                f'eta={eta:.1f}s'
-                            )
-
-                        self.progress_callback(progress_info)
-                        last_update_time[0] = current_time
-
-                self.update = custom_update
-
-            tqdm.__init__ = custom_tqdm_init
-
-        try:
-            if debug and progress_callback:
-                progress_callback({
-                    'stage': 'debug',
-                    'message': f'Starting transcription of {os.path.basename(audio_path)}'
-                })
-
-            # Get initial transcript from Whisper
-            result = self.whisper_model.transcribe(audio_path, **options)
-
-            # Track audio duration for cost tracking
-            if self.config.cost_tracking_enabled:
-                from .cost_tracker import track_api_call
-                track_api_call({}, f"whisper/{self.config.whisper_model}", result.get('segments', [{}])[-1].get('end', 0))
-
+        # Try WhisperKit-CLI first (optimized for Apple Silicon)
+        if self._is_whisperkit_available():
             if progress_callback:
                 progress_callback({
                     'stage': 'transcription',
-                    'message': f'Raw transcript length: {len(result["text"])} chars'
+                    'message': 'WhisperKit-CLI detected, using optimized transcription'
                 })
-        except Exception as e:
-            if debug and progress_callback:
-                import traceback
+
+            try:
+                initial_transcript = self._transcribe_with_whisperkit(
+                    audio_path,
+                    language=self.config.whisper_language,
+                    progress_callback=progress_callback,
+                    debug=debug
+                )
+
+                # Track "audio duration" for cost tracking (approximate based on transcript)
+                # WhisperKit doesn't provide segment data, so we estimate
+                if self.config.cost_tracking_enabled:
+                    from .cost_tracker import track_api_call
+                    # Estimate duration: ~150 words/min, ~5 chars/word = 750 chars/min
+                    estimated_duration = len(initial_transcript) / 750 * 60
+                    track_api_call({}, f"whisperkit/{self.config.whisper_model}", estimated_duration)
+
+                # Skip to the correction/return logic below
+                use_python_whisper = False
+
+            except Exception as e:
+                if progress_callback:
+                    progress_callback({
+                        'stage': 'warning',
+                        'message': f'WhisperKit-CLI failed ({str(e)}), falling back to Python Whisper'
+                    })
+                use_python_whisper = True
+        else:
+            if progress_callback and debug:
                 progress_callback({
                     'stage': 'debug',
-                    'message': f'Transcription error: {str(e)}\n{traceback.format_exc()}'
+                    'message': 'WhisperKit-CLI not found, using Python Whisper library'
                 })
-            raise
+            use_python_whisper = True
 
-        # Restore original tqdm if we modified it
-        if progress_callback:
-            tqdm.__init__ = original_tqdm
+        # Fall back to Python Whisper if needed
+        if use_python_whisper:
+            self._load_whisper()
 
-        initial_transcript = result["text"]
+            # Prepare transcription options
+            options = {}
+            if self.config.whisper_language:
+                options['language'] = self.config.whisper_language
 
-        # Take a sample for topic detection
-        sample_size = min(len(initial_transcript), self.config.topic_sample_size)
-        transcript_sample = initial_transcript[:sample_size]
+            # Set number of threads for transcription
+            if hasattr(self.config, 'num_threads'):
+                options['num_threads'] = self.config.num_threads
 
-        # Detect the domain/topic
-        if progress_callback:
-            progress_callback({
-                'stage': 'domain_detection',
-                'message': 'Detecting podcast domain for specialized transcript correction...'
-            })
-        domain = self._detect_topic(title, transcript_sample)
-        if progress_callback:
-            progress_callback({
-                'stage': 'domain_detected',
-                'message': f'Detected domain: {domain}'
-            })
+            if debug and progress_callback:
+                progress_callback({
+                    'stage': 'debug',
+                    'message': f'Transcription options: {options}'
+                })
 
-        # Correct the transcript using domain expertise
-        corrected_transcript = self._correct_transcript(initial_transcript, domain)
+            # Create a wrapper for tqdm that updates our progress (Python Whisper only)
+            if progress_callback:
+                from tqdm import tqdm
+                original_tqdm = tqdm.__init__
+                last_update_time = [time.time()]
 
-        return corrected_transcript
+                def custom_tqdm_init(self, *args, **kwargs):
+                    original_tqdm(self, *args, **kwargs)
+                    self.progress_callback = progress_callback
+                    self._original_update = self.update
+                    self._start_time = time.time()
+
+                    def custom_update(n=1):
+                        current_time = time.time()
+                        if current_time - last_update_time[0] >= 0.5:
+                            self._original_update(n)
+                            progress_info = {
+                                'stage': 'transcribing_progress',
+                                'progress': self.n / self.total if self.total else 0
+                            }
+
+                            if debug:
+                                elapsed = current_time - self._start_time
+                                rate = self.n / elapsed if elapsed > 0 else 0
+                                eta = (self.total - self.n) / rate if rate > 0 else 0
+                                progress_info['debug'] = (
+                                    f'frames={self.n}/{self.total} | '
+                                    f'rate={rate:.1f} frames/s | '
+                                    f'elapsed={elapsed:.1f}s | '
+                                    f'eta={eta:.1f}s'
+                                )
+
+                            self.progress_callback(progress_info)
+                            last_update_time[0] = current_time
+
+                    self.update = custom_update
+
+                tqdm.__init__ = custom_tqdm_init
+
+            try:
+                if debug and progress_callback:
+                    progress_callback({
+                        'stage': 'debug',
+                        'message': f'Starting transcription of {os.path.basename(audio_path)}'
+                    })
+
+                # Get initial transcript from Whisper
+                result = self.whisper_model.transcribe(audio_path, **options)
+
+                # Track audio duration for cost tracking
+                if self.config.cost_tracking_enabled:
+                    from .cost_tracker import track_api_call
+                    track_api_call({}, f"whisper/{self.config.whisper_model}", result.get('segments', [{}])[-1].get('end', 0))
+
+                if progress_callback:
+                    progress_callback({
+                        'stage': 'transcription',
+                        'message': f'Raw transcript length: {len(result["text"])} chars'
+                    })
+            except Exception as e:
+                if debug and progress_callback:
+                    import traceback
+                    progress_callback({
+                        'stage': 'debug',
+                        'message': f'Transcription error: {str(e)}\n{traceback.format_exc()}'
+                    })
+                raise
+
+            # Restore original tqdm if we modified it
+            if progress_callback:
+                tqdm.__init__ = original_tqdm
+
+            initial_transcript = result["text"]
+
+        # Only perform correction if enabled in config
+        if self.config.transcript_correction_enabled:
+            # Take a sample for topic detection
+            sample_size = min(len(initial_transcript), self.config.topic_sample_size)
+            transcript_sample = initial_transcript[:sample_size]
+
+            # Detect the domain/topic
+            if progress_callback:
+                progress_callback({
+                    'stage': 'domain_detection',
+                    'message': 'Detecting podcast domain for specialized transcript correction...'
+                })
+            domain = self._detect_topic(title, transcript_sample)
+            if progress_callback:
+                progress_callback({
+                    'stage': 'domain_detected',
+                    'message': f'Detected domain: {domain}'
+                })
+
+            # Correct the transcript using domain expertise
+            corrected_transcript = self._correct_transcript(initial_transcript, domain)
+            return corrected_transcript
+        else:
+            if progress_callback:
+                progress_callback({
+                    'stage': 'transcription',
+                    'message': 'Transcript correction disabled, using raw transcript'
+                })
+            return initial_transcript
 
     def _generate_embedding(self, text: str, normalize: bool = True) -> 'np.ndarray':
         """Generate vector embedding for text.
@@ -489,6 +687,7 @@ CHANGES MADE:
             headers=headers,
             json={
                 "model": self.config.openrouter_model,
+                "max_tokens": 8192,  # Allow longer summary outputs
                 "messages": [{
                     "role": "user",
                     "content": self.config.openrouter_prompt.format(transcript=transcript)
@@ -533,6 +732,7 @@ CHANGES MADE:
             headers=headers,
             json={
                 "model": self.config.openrouter_model,
+                "max_tokens": 4096,  # Allow adequate output for value analysis
                 "messages": [{
                     "role": "user",
                     "content": self.config.value_prompt.format(transcript=transcript)
@@ -1015,6 +1215,170 @@ CHANGES MADE:
                                 'stage': 'error',
                                 'message': f'Failed to rebuild search index: {str(e)}'
                             })
+
+    def reingest_episode(self, episode_id: int, progress_callback=None, debug: bool = False):
+        """Re-ingest a specific episode by ID, re-processing transcript and embeddings.
+
+        Args:
+            episode_id: Episode ID to re-ingest
+            progress_callback: Optional callback for progress updates
+            debug: Enable debug output
+
+        Raises:
+            Exception: If episode not found or processing fails
+        """
+        # Retrieve episode
+        episode = self.db.query(Episode).filter(Episode.id == episode_id).first()
+        if not episode:
+            raise Exception(f"Episode with ID {episode_id} not found")
+
+        if progress_callback:
+            progress_callback({
+                'stage': 'episode_start',
+                'episode': {
+                    'id': episode.id,
+                    'title': episode.title,
+                    'published_at': episode.published_at
+                }
+            })
+
+        # Store original values for reference
+        audio_url = episode.audio_url
+        if not audio_url:
+            raise Exception(f"Episode #{episode_id} has no audio URL")
+
+        # Reset processed state
+        episode.transcript = None
+        episode.transcript_source = None
+        episode.vector_embedding = None
+        episode.processed_at = None
+
+        try:
+            # Download audio
+            if progress_callback:
+                progress_callback({'stage': 'downloading', 'episode': {'title': episode.title}})
+
+            start_time = time.time()
+            temp_path = self._download_audio(audio_url)
+            download_time = time.time() - start_time
+
+            if progress_callback:
+                progress_callback({
+                    'stage': 'timing',
+                    'message': f'Audio download took {download_time:.2f} seconds'
+                })
+
+            # Check if we have an external transcript URL
+            if episode.transcript_url:
+                if progress_callback:
+                    progress_callback({
+                        'stage': 'external_transcript',
+                        'episode': {'title': episode.title},
+                        'message': f'Using external transcript from {episode.transcript_url}'
+                    })
+                try:
+                    start_time = time.time()
+                    episode.transcript = self._download_transcript(episode.transcript_url, progress_callback)
+                    episode.transcript_source = 'external'
+                    transcript_time = time.time() - start_time
+
+                    if progress_callback:
+                        progress_callback({
+                            'stage': 'timing',
+                            'message': f'External transcript processing took {transcript_time:.2f} seconds'
+                        })
+                except Exception as e:
+                    if progress_callback:
+                        progress_callback({
+                            'stage': 'warning',
+                            'message': f'Failed to use external transcript, falling back to local transcription: {str(e)}'
+                        })
+                    # Fall back to Whisper transcription
+                    episode.transcript_url = None
+
+            # If no external transcript or it failed, use local transcription
+            if not episode.transcript_url:
+                if progress_callback:
+                    progress_callback({
+                        'stage': 'info',
+                        'message': 'No external transcript found, falling back to local transcription'
+                    })
+                    progress_callback({'stage': 'transcribing', 'episode': {'title': episode.title}})
+
+                start_time = time.time()
+                episode.transcript = self._transcribe_audio(temp_path, episode.title, progress_callback, debug=debug)
+                episode.transcript_source = 'whisper'
+                transcribe_time = time.time() - start_time
+
+                if progress_callback:
+                    progress_callback({
+                        'stage': 'timing',
+                        'message': f'Audio transcription took {transcribe_time:.2f} seconds'
+                    })
+
+            # Generate embedding
+            if progress_callback:
+                progress_callback({'stage': 'embedding', 'episode': {'title': episode.title}})
+
+            start_time = time.time()
+            embedding = self._generate_embedding(episode.transcript)
+            episode.vector_embedding = json.dumps(embedding.tolist())
+            embedding_time = time.time() - start_time
+
+            if progress_callback:
+                progress_callback({
+                    'stage': 'timing',
+                    'message': f'Embedding generation took {embedding_time:.2f} seconds'
+                })
+
+            # Write to Obsidian if configured
+            if progress_callback:
+                progress_callback({'stage': 'exporting', 'episode': {'title': episode.title}})
+            self._write_to_obsidian(episode)
+
+            # Mark as processed
+            episode.processed_at = datetime.now()
+
+            # Report completion
+            if progress_callback:
+                progress_callback({
+                    'stage': 'episode_complete',
+                    'episode': {'title': episode.title}
+                })
+
+            # Cleanup temp audio file
+            os.unlink(temp_path)
+
+        except Exception as e:
+            if progress_callback:
+                progress_callback({
+                    'stage': 'error',
+                    'episode': {'title': episode.title},
+                    'error': str(e)
+                })
+            raise Exception(f"Failed to re-ingest episode: {str(e)}")
+
+        # Commit changes
+        self.db.commit()
+
+        # Rebuild Annoy index after successful episode processing
+        if episode.vector_embedding:
+            try:
+                start_time = time.time()
+                self._init_annoy_index(force_rebuild=True)
+                index_time = time.time() - start_time
+
+                if progress_callback:
+                    progress_callback({
+                        'stage': 'timing',
+                        'message': f'Index rebuild took {index_time:.2f} seconds'
+                    })
+            except Exception as e:
+                if progress_callback:
+                    progress_callback({
+                        'stage': 'error',
+                        'message': f'Failed to rebuild search index: {str(e)}'
+                    })
 
     def _find_relevant_excerpt(self, query: str, transcript: str, context_chars: int = None) -> str:
         """Find the most relevant excerpt from the transcript for the given query.

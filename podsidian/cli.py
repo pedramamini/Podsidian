@@ -111,6 +111,8 @@ def show_config():
         ('model', config.openrouter_model),
         ('processing_model', config.openrouter_processing_model),
         ('topic_sample_size', config.topic_sample_size),
+        ('transcript_correction_enabled', config.transcript_correction_enabled),
+        ('transcript_correction_chunk_size', config.transcript_correction_chunk_size),
         ('cost_tracking_enabled', config.cost_tracking_enabled),
         ('prompt', config.openrouter_prompt)
     ]
@@ -514,6 +516,122 @@ def ingest(lookback, debug):
 
     # Display cost summary if enabled
     if config.cost_tracking_enabled:
+        click.echo("\n" + format_cost_summary())
+
+@cli.command()
+@click.argument('episode_ids', nargs=-1, type=int, required=True)
+@click.option('--debug', is_flag=True, help='Enable debug output')
+def reingest(episode_ids, debug):
+    """Re-ingest specific episodes by ID, re-processing transcripts and embeddings.
+
+    Useful for:
+    - Fixing episodes that were truncated during LLM correction
+    - Re-processing episodes after configuration changes
+    - Testing transcription changes
+
+    Examples:
+        podsidian reingest 2303
+        podsidian reingest 2303 2304 2305
+        podsidian reingest 2303 --debug
+    """
+    from .core import PodcastProcessor
+    from .cost_tracker import init_cost_tracker, format_cost_summary
+
+    # Initialize cost tracker if enabled
+    cost_tracking_enabled = config.cost_tracking_enabled
+    if cost_tracking_enabled:
+        init_cost_tracker()
+
+    session = get_db_session()
+    processor = PodcastProcessor(session)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    click.echo(f"[{timestamp}] Re-ingesting {len(episode_ids)} episode(s)...")
+
+    def show_progress(info):
+        stage = info['stage']
+
+        if stage == 'episode_start':
+            episode = info['episode']
+            published = episode.get('published_at')
+            published_str = published.strftime('%Y-%m-%d') if published else 'Unknown date'
+
+            click.echo(f"\n{click.style('Episode #' + str(episode['id']), fg='blue', bold=True)} - {published_str}")
+            click.echo(f"  {click.style('Title:', fg='bright_black')} {episode['title']}")
+
+        elif stage == 'downloading':
+            click.echo(f"  {click.style('→', fg='yellow')} Downloading audio...")
+
+        elif stage == 'external_transcript':
+            click.echo(f"  {click.style('→', fg='yellow')} Using external transcript...")
+
+        elif stage == 'transcribing':
+            click.echo(f"  {click.style('→', fg='yellow')} Transcribing audio...")
+
+        elif stage == 'transcribing_progress':
+            progress = info['progress']
+            width = 30
+            filled = int(width * progress)
+            bar = '=' * filled + '-' * (width - filled)
+            percentage = int(progress * 100)
+            click.echo(f"\r  {click.style('→', fg='yellow')} Transcribing: [{bar}] {percentage}%", nl=False)
+
+        elif stage == 'transcription':
+            message = info.get('message', '')
+            if message:
+                click.echo(f"  {click.style('ℹ', fg='blue')} {message}")
+
+        elif stage == 'embedding':
+            click.echo(f"  {click.style('→', fg='yellow')} Generating embeddings...")
+
+        elif stage == 'exporting':
+            click.echo(f"  {click.style('→', fg='yellow')} Exporting to Obsidian...")
+
+        elif stage == 'episode_complete':
+            click.echo(f"  {click.style('✓', fg='green')} Episode complete")
+
+        elif stage == 'error':
+            error = info.get('error', 'Unknown error')
+            click.echo(f"  {click.style('✗', fg='red')} Error: {error}")
+
+        elif stage == 'warning':
+            message = info.get('message', '')
+            click.echo(f"  {click.style('⚠', fg='yellow')} {message}")
+
+        elif stage == 'info':
+            message = info.get('message', '')
+            click.echo(f"  {click.style('ℹ', fg='blue')} {message}")
+
+        elif stage == 'timing':
+            message = info.get('message', '')
+            if debug:
+                click.echo(f"  {click.style('⏱', fg='bright_black')} {message}")
+
+        elif stage == 'debug':
+            message = info.get('message', '')
+            if debug:
+                click.echo(f"  {click.style('DEBUG:', fg='magenta')} {message}")
+
+    # Process each episode
+    success_count = 0
+    failed_count = 0
+
+    for episode_id in episode_ids:
+        try:
+            processor.reingest_episode(episode_id, progress_callback=show_progress, debug=debug)
+            success_count += 1
+        except Exception as e:
+            failed_count += 1
+            click.echo(f"\n{click.style('Error processing episode #' + str(episode_id) + ':', fg='red')} {str(e)}")
+
+    # Summary
+    click.echo(f"\n{click.style('Summary:', bold=True)}")
+    click.echo(f"  {click.style('✓', fg='green')} Successfully re-ingested: {success_count}")
+    if failed_count > 0:
+        click.echo(f"  {click.style('✗', fg='red')} Failed: {failed_count}")
+
+    # Display cost summary if enabled
+    if cost_tracking_enabled:
         click.echo("\n" + format_cost_summary())
 
 @cli.command()
