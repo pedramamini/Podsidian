@@ -21,9 +21,10 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
   - Downloads and transcribes episodes, then discards audio to save space
 - **Smart Transcription Pipeline**:
   - Automatic detection and use of external transcripts when available
-  - Fallback to OpenAI's Whisper for transcription when needed
-  - Automatic domain detection (e.g., Brazilian Jiu-Jitsu, Quantum Physics)
-  - Domain-aware transcript correction for technical terms and jargon
+  - **WhisperKit-CLI**: Optimized transcription for Apple Silicon (5-10x faster than Python Whisper)
+  - Automatic fallback to OpenAI's Whisper Python library when WhisperKit unavailable
+  - Optional domain detection (e.g., Brazilian Jiu-Jitsu, Quantum Physics)
+  - Configurable domain-aware transcript correction for technical terms and jargon
   - High-quality output optimized for each podcast's subject matter
 - **AI-Powered Analysis**:
   - Uses OpenRouter to generate customized summaries and insights
@@ -156,6 +157,15 @@ processing_model = "openai/gpt-4o"
 # Sample size in characters for topic detection
 topic_sample_size = 4096
 
+# Enable LLM-based transcript correction (can be expensive for long transcripts)
+# When enabled, transcripts are corrected for domain-specific terminology
+# Disabled by default to reduce API costs
+transcript_correction_enabled = false
+
+# Characters per chunk when correcting long transcripts
+# Larger chunks = fewer API calls but higher token usage per call
+transcript_correction_chunk_size = 8000
+
 # Model to use for summarization
 # See https://openrouter.ai/docs for available models
 model = "openai/gpt-4o"
@@ -244,6 +254,11 @@ podsidian ingest --debug
 # Export a specific episode transcript
 podsidian export <episode_id>
 
+# Re-ingest specific episodes (useful for fixing truncated transcripts or testing changes)
+podsidian reingest 2303
+podsidian reingest 2303 2304 2305        # Re-ingest multiple episodes
+podsidian reingest 2303 --debug          # With debug output
+
 # Search through podcast content using natural language (default 30% relevance)
 podsidian search "impact of blockchain on cybersecurity"
 
@@ -331,7 +346,10 @@ This will display:
 
 2. **Content Processing**:
    - Downloads episodes temporarily
-   - Transcribes using Whisper AI
+   - **Transcription Priority Order**:
+     1. Uses external transcript from RSS feed (if available)
+     2. WhisperKit-CLI for Apple Silicon (if installed)
+     3. Python Whisper library (fallback)
    - Generates vector embeddings
    - Updates Annoy vector index
    - Stores in SQLite database
@@ -538,14 +556,36 @@ Model size trade-offs:
 - **large**: 10GB VRAM, very high accuracy
 - **large-v3**: 10GB VRAM, highest accuracy, improved performance (default)
 
+## WhisperKit-CLI for Apple Silicon (Recommended)
+
+For optimal transcription performance on Apple Silicon Macs, install WhisperKit-CLI:
+
+```bash
+# Install via Homebrew
+brew install whisperkit-cli
+
+# Or download from GitHub releases
+# https://github.com/argmaxinc/WhisperKit/releases
+```
+
+**Performance Comparison**:
+- **WhisperKit-CLI**: ~2-5 minutes for a 1-hour podcast (5-10x faster)
+- **Python Whisper**: ~15-30 minutes for a 1-hour podcast
+
+WhisperKit leverages Apple's Neural Engine and CoreML for hardware-accelerated transcription. Podsidian automatically detects and uses WhisperKit-CLI when available, falling back to Python Whisper otherwise.
+
+The first time you use WhisperKit, it will download the model (stored in `~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/`). Subsequent transcriptions use the cached model.
+
 ## Smart Transcript Processing
 
 Podsidian uses a sophisticated pipeline to ensure high-quality transcripts:
 
-1. **Initial Transcription**: Uses Whisper to convert audio to text
-2. **Domain Detection**: Analyzes a sample of the transcript to identify the podcast's domain (e.g., Brazilian Jiu-Jitsu, Quantum Physics, Constitutional Law)
-3. **Expert Correction**: Uses domain expertise to fix technical terms, jargon, and specialized vocabulary
-4. **Final Processing**: The corrected transcript is then summarized and stored
+1. **Initial Transcription**: Uses the best available transcription method (RSS transcript > WhisperKit-CLI > Python Whisper)
+2. **Domain Detection** (Optional): Analyzes a sample of the transcript to identify the podcast's domain (e.g., Brazilian Jiu-Jitsu, Quantum Physics, Constitutional Law)
+3. **Expert Correction** (Optional): Uses domain expertise to fix technical terms, jargon, and specialized vocabulary with chunking support for long transcripts
+4. **Final Processing**: The transcript is then summarized and stored
+
+**Note**: Domain-aware transcript correction is **disabled by default** to reduce API costs. Enable it in your config if needed for technical content.
 
 This is particularly useful for:
 - Technical podcasts with specialized terminology
@@ -567,7 +607,11 @@ api_key = "your-api-key"  # Or set PODSIDIAN_OPENROUTER_API_KEY env var
 # Model settings
 model = "openai/gpt-4"             # Model for summarization
 processing_model = "openai/gpt-4"  # Model for domain detection and corrections
-topic_sample_size = 16000          # Characters to analyze for domain detection
+topic_sample_size = 4096           # Characters to analyze for domain detection
+
+# Transcript correction settings (disabled by default to reduce costs)
+transcript_correction_enabled = false  # Enable LLM-based transcript correction
+transcript_correction_chunk_size = 8000  # Characters per chunk for long transcripts
 
 [search]
 # Default relevance threshold for semantic search (0-100)
