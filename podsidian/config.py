@@ -48,6 +48,8 @@ DEFAULT_CONFIG = {
         "model": "openai/gpt-4",
         "processing_model": "openai/gpt-4",  # Model for topic detection and transcript correction
         "topic_sample_size": 4000,  # Sample size for topic detection
+        "transcript_correction_enabled": False,  # Enable LLM-based transcript correction
+        "transcript_correction_chunk_size": 8000,  # Characters per chunk for correction
         "cost_tracking_enabled": True,  # Enable cost tracking for API calls
         "prompt": """You are a helpful podcast summarizer.
 Given the following podcast transcript, provide:
@@ -166,6 +168,16 @@ class Config:
     def topic_sample_size(self) -> int:
         """Get sample size for topic detection."""
         return self.config["openrouter"]["topic_sample_size"]
+
+    @property
+    def transcript_correction_enabled(self) -> bool:
+        """Whether to enable LLM-based transcript correction."""
+        return self.config["openrouter"]["transcript_correction_enabled"]
+
+    @property
+    def transcript_correction_chunk_size(self) -> int:
+        """Get chunk size for transcript correction."""
+        return self.config["openrouter"]["transcript_correction_chunk_size"]
 
     @property
     def openrouter_prompt(self) -> str:

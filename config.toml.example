@@ -80,6 +80,15 @@ processing_model = "openai/gpt-4o"
 # Sample size in characters for topic detection
 topic_sample_size = 4096
 
+# Enable LLM-based transcript correction (can be expensive for long transcripts)
+# When enabled, transcripts are corrected for domain-specific terminology
+# Disabled by default to reduce API costs
+transcript_correction_enabled = false
+
+# Characters per chunk when correcting long transcripts
+# Larger chunks = fewer API calls but higher token usage per call
+transcript_correction_chunk_size = 8000
+
 # Model to use for summarization
 # See https://openrouter.ai/docs for available models
 model = "openai/gpt-4o"
