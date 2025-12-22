@@ -97,12 +97,12 @@ OUTPUT INSTRUCTIONS
 
 • Output a valid JSON file with the following fields for the input provided.
 
-{
+{{
 estimated-content-minutes: "(estimated-content-minutes)",
 value-instances: "(list of valid value instances)",
 vpm: "(the calculated VPS score.)",
 vpm-explanation: "(A one-sentence summary of less than 20 words on how you calculated the VPM for the content.)"
-}
+}}
 
 Transcript:
 {transcript}
