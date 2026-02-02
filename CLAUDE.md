@@ -29,6 +29,7 @@ podsidian init                    # Initialize configuration
 podsidian show-config            # Display current config and status
 podsidian ingest --debug         # Process new episodes with debug output
 podsidian search "query"         # Perform semantic search
+podsidian briefing               # Generate personalized news briefing
 podsidian mcp --stdio           # Start MCP server for AI agents
 
 # Database operations

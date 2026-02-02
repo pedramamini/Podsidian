@@ -61,41 +61,35 @@ class MCPServer:
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Natural language search query"
-                        },
+                        "query": {"type": "string", "description": "Natural language search query"},
                         "limit": {
                             "type": "integer",
                             "description": "Maximum number of results (default: 10)",
-                            "default": 10
+                            "default": 10,
                         },
                         "relevance": {
                             "type": "integer",
                             "description": "Minimum relevance score 0-100 (default: 25)",
-                            "default": 25
-                        }
+                            "default": 25,
+                        },
                     },
-                    "required": ["query"]
-                }
+                    "required": ["query"],
+                },
             },
             "search_keyword": {
                 "description": "Search podcast transcripts for exact keyword matches. Performs case-insensitive exact text matching within transcripts. Use this when you need to find specific words or phrases.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "keyword": {
-                            "type": "string",
-                            "description": "Text to search for"
-                        },
+                        "keyword": {"type": "string", "description": "Text to search for"},
                         "limit": {
                             "type": "integer",
                             "description": "Maximum number of results (default: 10)",
-                            "default": 10
-                        }
+                            "default": 10,
+                        },
                     },
-                    "required": ["keyword"]
-                }
+                    "required": ["keyword"],
+                },
             },
             "list_episodes": {
                 "description": "List processed podcast episodes. Returns a paginated list of episodes that have been transcribed, ordered by publication date (newest first).",
@@ -105,16 +99,16 @@ class MCPServer:
                         "limit": {
                             "type": "integer",
                             "description": "Maximum number of episodes to return (default: 100)",
-                            "default": 100
+                            "default": 100,
                         },
                         "offset": {
                             "type": "integer",
                             "description": "Number of episodes to skip (default: 0)",
-                            "default": 0
-                        }
+                            "default": 0,
+                        },
                     },
-                    "required": []
-                }
+                    "required": [],
+                },
             },
             "get_episode": {
                 "description": "Get specific episode details and full transcript. Use this to retrieve complete episode information including the full transcript text.",
@@ -123,59 +117,72 @@ class MCPServer:
                     "properties": {
                         "episode_id": {
                             "type": "integer",
-                            "description": "ID of the episode to retrieve"
+                            "description": "ID of the episode to retrieve",
                         }
                     },
-                    "required": ["episode_id"]
-                }
+                    "required": ["episode_id"],
+                },
             },
             "list_subscriptions": {
                 "description": "List all podcast subscriptions with their mute state. Shows information about all podcasts you're subscribed to in Apple Podcasts, along with their processing status in Podsidian.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
+                "inputSchema": {"type": "object", "properties": {}, "required": []},
             },
             "mute_subscription": {
                 "description": "Mute a podcast subscription by title. Muted podcasts will not be processed during ingestion.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "title": {
-                            "type": "string",
-                            "description": "Title of the podcast to mute"
-                        }
+                        "title": {"type": "string", "description": "Title of the podcast to mute"}
                     },
-                    "required": ["title"]
-                }
+                    "required": ["title"],
+                },
             },
             "unmute_subscription": {
                 "description": "Unmute a podcast subscription by title. Allows the podcast to be processed during ingestion.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "title": {
-                            "type": "string",
-                            "description": "Title of the podcast to unmute"
-                        }
+                        "title": {"type": "string", "description": "Title of the podcast to unmute"}
                     },
-                    "required": ["title"]
-                }
-            }
+                    "required": ["title"],
+                },
+            },
+            "generate_briefing": {
+                "description": (
+                    "Generate a personalized news briefing from "
+                    "recent podcast episodes. Searches across "
+                    "interest categories using semantic search, "
+                    "then synthesizes a briefing via LLM."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "days": {
+                            "type": "integer",
+                            "description": "Days to look back (default: 7)",
+                            "default": 7,
+                        },
+                        "categories": {
+                            "type": "string",
+                            "description": ("Comma-separated custom search categories (optional)"),
+                        },
+                    },
+                    "required": [],
+                },
+            },
         }
 
         self.resources = {
             "podsidian://episodes": {
                 "name": "Podcast Episodes",
                 "description": "Access to podcast episode data",
-                "mimeType": "application/json"
+                "mimeType": "application/json",
             },
             "podsidian://subscriptions": {
                 "name": "Podcast Subscriptions",
                 "description": "Access to podcast subscription data",
-                "mimeType": "application/json"
-            }
+                "mimeType": "application/json",
+            },
         }
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -193,15 +200,9 @@ class MCPServer:
                     "id": request_id,
                     "result": {
                         "protocolVersion": "2024-11-05",
-                        "capabilities": {
-                            "tools": {},
-                            "resources": {}
-                        },
-                        "serverInfo": {
-                            "name": "podsidian-mcp",
-                            "version": "1.0.0"
-                        }
-                    }
+                        "capabilities": {"tools": {}, "resources": {}},
+                        "serverInfo": {"name": "podsidian-mcp", "version": "1.0.0"},
+                    },
                 }
 
             elif method == "notifications/initialized":
@@ -211,19 +212,15 @@ class MCPServer:
             elif method == "tools/list":
                 tools_list = []
                 for name, tool_def in self.tools.items():
-                    tools_list.append({
-                        "name": name,
-                        "description": tool_def["description"],
-                        "inputSchema": tool_def["inputSchema"]
-                    })
+                    tools_list.append(
+                        {
+                            "name": name,
+                            "description": tool_def["description"],
+                            "inputSchema": tool_def["inputSchema"],
+                        }
+                    )
 
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {
-                        "tools": tools_list
-                    }
-                }
+                return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": tools_list}}
 
             elif method == "tools/call":
                 tool_name = params.get("name")
@@ -234,33 +231,22 @@ class MCPServer:
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": {
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": result
-                            }
-                        ]
-                    }
+                    "result": {"content": [{"type": "text", "text": result}]},
                 }
 
             elif method == "resources/list":
                 resources_list = []
                 for uri, resource_def in self.resources.items():
-                    resources_list.append({
-                        "uri": uri,
-                        "name": resource_def["name"],
-                        "description": resource_def["description"],
-                        "mimeType": resource_def["mimeType"]
-                    })
+                    resources_list.append(
+                        {
+                            "uri": uri,
+                            "name": resource_def["name"],
+                            "description": resource_def["description"],
+                            "mimeType": resource_def["mimeType"],
+                        }
+                    )
 
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {
-                        "resources": resources_list
-                    }
-                }
+                return {"jsonrpc": "2.0", "id": request_id, "result": {"resources": resources_list}}
 
             elif method == "resources/read":
                 uri = params.get("uri")
@@ -270,24 +256,15 @@ class MCPServer:
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "result": {
-                        "contents": [
-                            {
-                                "uri": uri,
-                                "mimeType": "text/plain",
-                                "text": result
-                            }
-                        ]
-                    }
+                        "contents": [{"uri": uri, "mimeType": "text/plain", "text": result}]
+                    },
                 }
 
             else:
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "error": {
-                        "code": -32601,
-                        "message": f"Method not found: {method}"
-                    }
+                    "error": {"code": -32601, "message": f"Method not found: {method}"},
                 }
 
         except Exception as e:
@@ -295,10 +272,7 @@ class MCPServer:
             return {
                 "jsonrpc": "2.0",
                 "id": request.get("id"),
-                "error": {
-                    "code": -32603,
-                    "message": f"Internal error: {str(e)}"
-                }
+                "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
             }
 
     async def call_tool(self, name: str, arguments: Dict[str, Any]) -> str:
@@ -319,7 +293,7 @@ class MCPServer:
 
             response_text = f"Found {len(results)} semantic search results for '{query}':\n\n"
             for i, result in enumerate(results, 1):
-                similarity_pct = int(result['similarity'] * 100)
+                similarity_pct = int(result["similarity"] * 100)
                 response_text += f"{i}. {result['podcast']} - {result['episode']}\n"
                 response_text += f"   Published: {result['published_at']}\n"
                 response_text += f"   Relevance: {similarity_pct}%\n"
@@ -332,9 +306,12 @@ class MCPServer:
             limit = arguments.get("limit", 10)
 
             # Perform keyword search using database query
-            episodes = db.query(Episode).filter(
-                Episode.transcript.ilike(f"%{keyword}%")
-            ).limit(limit).all()
+            episodes = (
+                db.query(Episode)
+                .filter(Episode.transcript.ilike(f"%{keyword}%"))
+                .limit(limit)
+                .all()
+            )
 
             if not episodes:
                 return f"No results found for keyword search: '{keyword}'"
@@ -360,12 +337,14 @@ class MCPServer:
                     if end < len(transcript):
                         excerpt = excerpt + "..."
 
-                    results.append({
-                        'podcast': episode.podcast.title,
-                        'episode': episode.title,
-                        'published_at': episode.published_at,
-                        'excerpt': excerpt
-                    })
+                    results.append(
+                        {
+                            "podcast": episode.podcast.title,
+                            "episode": episode.title,
+                            "published_at": episode.published_at,
+                            "excerpt": excerpt,
+                        }
+                    )
 
             response_text = f"Found {len(results)} keyword search results for '{keyword}':\n\n"
             for i, result in enumerate(results, 1):
@@ -379,14 +358,18 @@ class MCPServer:
             limit = arguments.get("limit", 100)
             offset = arguments.get("offset", 0)
 
-            episodes = db.query(Episode).order_by(
-                Episode.published_at.desc()
-            ).offset(offset).limit(limit).all()
+            episodes = (
+                db.query(Episode)
+                .order_by(Episode.published_at.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
 
             if not episodes:
                 return "No episodes found in the database."
 
-            response_text = f"Found {len(episodes)} episodes (showing {offset+1}-{offset+len(episodes)}):\n\n"
+            response_text = f"Found {len(episodes)} episodes (showing {offset + 1}-{offset + len(episodes)}):\n\n"
             for i, episode in enumerate(episodes, offset + 1):
                 has_transcript = "✓" if episode.transcript else "✗"
                 response_text += f"{i}. {episode.podcast.title} - {episode.title}\n"
@@ -424,13 +407,13 @@ class MCPServer:
 
             # Ensure all podcasts exist in database
             for sub in subs:
-                podcast = db.query(Podcast).filter_by(feed_url=sub['feed_url']).first()
+                podcast = db.query(Podcast).filter_by(feed_url=sub["feed_url"]).first()
                 if not podcast:
                     podcast = Podcast(
-                        title=sub['title'],
-                        author=sub['author'],
-                        feed_url=sub['feed_url'],
-                        muted=False
+                        title=sub["title"],
+                        author=sub["author"],
+                        feed_url=sub["feed_url"],
+                        muted=False,
                     )
                     db.add(podcast)
             db.commit()
@@ -440,15 +423,18 @@ class MCPServer:
 
             # Get episode counts for each podcast
             from sqlalchemy import func
-            episode_counts = dict(db.query(
-                Podcast.feed_url,
-                func.count(Episode.id).label('count')
-            ).join(Episode, isouter=True).group_by(Podcast.feed_url).all())
+
+            episode_counts = dict(
+                db.query(Podcast.feed_url, func.count(Episode.id).label("count"))
+                .join(Episode, isouter=True)
+                .group_by(Podcast.feed_url)
+                .all()
+            )
 
             response_text = f"Found {len(subs)} podcast subscriptions:\n\n"
             for i, sub in enumerate(subs, 1):
-                muted = muted_feeds.get(sub['feed_url'], False)
-                episode_count = episode_counts.get(sub['feed_url'], 0)
+                muted = muted_feeds.get(sub["feed_url"], False)
+                episode_count = episode_counts.get(sub["feed_url"], 0)
                 status = "MUTED" if muted else "ACTIVE"
 
                 response_text += f"{i}. {sub['title']}\n"
@@ -482,6 +468,23 @@ class MCPServer:
 
             return f"Successfully unmuted podcast: {title}"
 
+        elif name == "generate_briefing":
+            days = arguments.get("days", 7)
+            categories_str = arguments.get("categories")
+
+            cat_queries = None
+            cat_labels = None
+            if categories_str:
+                cat_labels = [c.strip() for c in categories_str.split(",")]
+                cat_queries = cat_labels
+
+            result = proc.generate_briefing(
+                days=days,
+                categories=cat_queries,
+                category_labels=cat_labels,
+            )
+            return result
+
         else:
             raise ValueError(f"Unknown tool: {name}")
 
@@ -491,9 +494,7 @@ class MCPServer:
 
         if uri == "podsidian://episodes":
             # Get recent episodes
-            episodes = db.query(Episode).order_by(
-                Episode.published_at.desc()
-            ).limit(10).all()
+            episodes = db.query(Episode).order_by(Episode.published_at.desc()).limit(10).all()
 
             return f"Recent episodes: {len(episodes)} episodes found"
 
@@ -540,10 +541,7 @@ class MCPServer:
                     error_response = {
                         "jsonrpc": "2.0",
                         "id": None,
-                        "error": {
-                            "code": -32700,
-                            "message": "Parse error"
-                        }
+                        "error": {"code": -32700, "message": "Parse error"},
                     }
                     print(json.dumps(error_response))
                     sys.stdout.flush()
@@ -562,11 +560,15 @@ async def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
         description="MCP STDIO server for Podsidian",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    parser.add_argument("--log", metavar="FILE", default="/tmp/podsidian_mcp_stdio.log",
-                       help="Path to log file for debug outputs")
+    parser.add_argument(
+        "--log",
+        metavar="FILE",
+        default="/tmp/podsidian_mcp_stdio.log",
+        help="Path to log file for debug outputs",
+    )
 
     args = parser.parse_args()
 
@@ -575,7 +577,7 @@ async def main():
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[logging.FileHandler(args.log)],
-        force=True  # Override any existing configuration
+        force=True,  # Override any existing configuration
     )
 
     # Set log level for our logger
@@ -598,7 +600,7 @@ async def run_stdio_server():
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[logging.StreamHandler(sys.stderr)],
-        force=True
+        force=True,
     )
 
     logger.setLevel(logging.INFO)

@@ -35,6 +35,10 @@ Podsidian is a powerful tool that bridges your Apple Podcast subscriptions with 
   - Finds relevant content even when exact words don't match
   - Configurable relevance threshold for fine-tuning results
   - Results grouped by podcast with relevant excerpts
+- **Personalized Briefings**:
+  - Generate news briefings from recent podcast content across configurable interest categories
+  - Semantic search across categories with time-window filtering and deduplication
+  - LLM-synthesized briefing with actionable insights and top episode picks
 - **Obsidian Integration**:
   - Generates markdown notes with customizable templates
 - **AI Agent Integration**:
@@ -267,6 +271,15 @@ podsidian search "meditation techniques for beginners" --relevance 75
 
 # Force refresh of search index before searching
 podsidian search "blockchain" --refresh
+
+# Generate a personalized news briefing from recent episodes
+podsidian briefing
+
+# Briefing with custom lookback window
+podsidian briefing --days 30
+
+# Briefing with custom categories
+podsidian briefing --categories "cybersecurity,AI,health"
 
 # Start the MCP service (HTTP mode)
 podsidian mcp --port 8080

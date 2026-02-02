@@ -5,9 +5,19 @@ from typing import Optional, Dict, List
 
 # Available Whisper models
 WHISPER_MODELS = {
-    'tiny.en', 'tiny', 'base.en', 'base', 'small.en', 'small',
-    'medium.en', 'medium', 'large-v1', 'large-v2', 'large-v3',
-    'large', 'large-v3-turbo'
+    "tiny.en",
+    "tiny",
+    "base.en",
+    "base",
+    "small.en",
+    "small",
+    "medium.en",
+    "medium",
+    "large-v1",
+    "large-v2",
+    "large-v3",
+    "large",
+    "large-v3-turbo",
 }
 
 DEFAULT_CONFIG = {
@@ -16,7 +26,7 @@ DEFAULT_CONFIG = {
         "language": "",
         "cpu_only": False,
         "threads": 4,
-        "ffmpeg_path": None
+        "ffmpeg_path": None,
     },
     "search": {
         "excerpt_length": 300  # Length of excerpt context in characters
@@ -24,7 +34,7 @@ DEFAULT_CONFIG = {
     "annoy": {
         "index_path": "~/.config/podsidian/annoy.idx",
         "n_trees": 10,  # More trees = better accuracy but slower build
-        "metric": "angular"  # angular = cosine similarity
+        "metric": "angular",  # angular = cosine similarity
     },
     "obsidian": {
         "vault_path": "~/Documents/Obsidian",
@@ -41,7 +51,7 @@ DEFAULT_CONFIG = {
 {value_analysis}
 ## Transcript
 {transcript}
-"""
+""",
     },
     "openrouter": {
         "api_key": "",  # Set via PODSIDIAN_OPENROUTER_API_KEY env var
@@ -106,9 +116,49 @@ vpm-explanation: "(A one-sentence summary of less than 20 words on how you calcu
 
 Transcript:
 {transcript}
-"""
-    }
+""",
+    },
+    "briefing": {
+        "categories": [
+            "cybersecurity threats vulnerabilities hacking zero-day exploits",
+            "artificial intelligence machine learning LLMs AI agents",
+            "startups venture capital funding seed series",
+            "investing markets finance economy stocks crypto",
+            "science research breakthroughs discoveries",
+            "health longevity biohacking wellness medicine",
+        ],
+        "category_labels": [
+            "Cybersecurity",
+            "AI & Machine Learning",
+            "Startups & Venture Capital",
+            "Investments & Markets",
+            "Science & Research",
+            "Health & Longevity",
+        ],
+        "results_per_category": 5,
+        "relevance_threshold": 25,
+        "default_days": 7,
+        "prompt": (
+            "You are a personalized podcast intelligence briefer for a "
+            "cybersecurity and AI professional who is also a startup "
+            "founder and investor.\n\n"
+            "Below are excerpts from recently ingested podcast episodes, "
+            "organized by topic category. Synthesize these into a "
+            "concise, actionable news briefing.\n\n"
+            "Rules:\n"
+            "- Skip any category that has no entries\n"
+            "- Attribute key insights to the specific podcast and episode\n"
+            "- Highlight actionable intelligence: threats, opportunities, "
+            "tools, investments\n"
+            "- End with a Top Picks section: the 3-5 episodes most worth "
+            "listening to in full, with one-line reasons\n"
+            "- Be direct and concise — no filler, no fluff\n"
+            "- Use markdown formatting with headers per category\n\n"
+            "{context}"
+        ),
+    },
 }
+
 
 class Config:
     def __init__(self):
@@ -189,7 +239,9 @@ class Config:
         """Get the configured Whisper model size."""
         model = self.config["whisper"]["model"]
         if model not in WHISPER_MODELS:
-            raise ValueError(f"Invalid Whisper model: {model}. Must be one of: {', '.join(WHISPER_MODELS)}")
+            raise ValueError(
+                f"Invalid Whisper model: {model}. Must be one of: {', '.join(WHISPER_MODELS)}"
+            )
         return model
 
     @property
@@ -247,7 +299,37 @@ class Config:
     def annoy_metric(self) -> str:
         """Get the configured distance metric for Annoy index."""
         return self.config["annoy"]["metric"]
-        return self.config["openrouter"]["value_prompt"]
+
+    @property
+    def briefing_categories(self) -> List[str]:
+        """Get the briefing search category queries."""
+        return self.config["briefing"]["categories"]
+
+    @property
+    def briefing_category_labels(self) -> List[str]:
+        """Get the briefing category display labels."""
+        return self.config["briefing"]["category_labels"]
+
+    @property
+    def briefing_results_per_category(self) -> int:
+        """Get max results per category for briefing."""
+        return self.config["briefing"]["results_per_category"]
+
+    @property
+    def briefing_relevance_threshold(self) -> int:
+        """Get minimum relevance threshold for briefing results (0-100)."""
+        return self.config["briefing"]["relevance_threshold"]
+
+    @property
+    def briefing_default_days(self) -> int:
+        """Get default lookback days for briefing."""
+        return self.config["briefing"]["default_days"]
+
+    @property
+    def briefing_prompt(self) -> str:
+        """Get the briefing synthesis prompt template."""
+        return self.config["briefing"]["prompt"]
+
 
 def get_database_session():
     """Get a database session using the default database path."""
@@ -266,6 +348,7 @@ def get_database_session():
     engine = init_db(DEFAULT_DB_PATH)
     Session = sessionmaker(bind=engine)
     return Session()
+
 
 # Global config instance
 config = Config()

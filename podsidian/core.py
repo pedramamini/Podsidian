@@ -7,13 +7,14 @@ import feedparser
 import requests
 import subprocess
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 from sqlalchemy.orm import Session
 
 from .models import Podcast, Episode
 from .apple_podcasts import get_subscriptions
+
 
 class PodcastProcessor:
     def __init__(self, db_session: Session):
@@ -25,6 +26,7 @@ class PodcastProcessor:
 
         # Import here to avoid circular imports
         from .config import config
+
         self.config = config
 
     def _load_whisper(self):
@@ -35,54 +37,56 @@ class PodcastProcessor:
             import whisper
 
             # Set tokenizers parallelism
-            os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
             # Set ffmpeg path in environment if configured
             if self.config.ffmpeg_path:
-                os.environ['PATH'] = f"{os.path.dirname(self.config.ffmpeg_path)}:{os.environ.get('PATH', '')}"
-                if hasattr(self, '_progress_callback') and self._debug:
-                    self._progress_callback({
-                        'stage': 'debug',
-                        'message': f'Set ffmpeg path: {self.config.ffmpeg_path}'
-                    })
+                os.environ["PATH"] = (
+                    f"{os.path.dirname(self.config.ffmpeg_path)}:{os.environ.get('PATH', '')}"
+                )
+                if hasattr(self, "_progress_callback") and self._debug:
+                    self._progress_callback(
+                        {"stage": "debug", "message": f"Set ffmpeg path: {self.config.ffmpeg_path}"}
+                    )
 
-            if hasattr(self, '_progress_callback') and self._debug:
-                self._progress_callback({
-                    'stage': 'debug',
-                    'message': f'Loading Whisper model: {self.config.whisper_model}'
-                })
+            if hasattr(self, "_progress_callback") and self._debug:
+                self._progress_callback(
+                    {
+                        "stage": "debug",
+                        "message": f"Loading Whisper model: {self.config.whisper_model}",
+                    }
+                )
 
             # Suppress FP16 warning on CPU
-            warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
+            warnings.filterwarnings(
+                "ignore", message="FP16 is not supported on CPU; using FP32 instead"
+            )
 
             # Set device based on config and availability
             if self.config.whisper_cpu_only:
                 device = "cpu"
                 if self.config.whisper_threads > 0:
                     torch.set_num_threads(self.config.whisper_threads)
-                    if hasattr(self, '_progress_callback') and self._debug:
-                        self._progress_callback({
-                            'stage': 'debug',
-                            'message': f'Set torch threads to {self.config.whisper_threads}'
-                        })
+                    if hasattr(self, "_progress_callback") and self._debug:
+                        self._progress_callback(
+                            {
+                                "stage": "debug",
+                                "message": f"Set torch threads to {self.config.whisper_threads}",
+                            }
+                        )
             else:
                 device = "cuda" if torch.cuda.is_available() else "cpu"
-                if hasattr(self, '_progress_callback') and self._debug:
-                    self._progress_callback({
-                        'stage': 'debug',
-                        'message': f'Using device: {device}'
-                    })
+                if hasattr(self, "_progress_callback") and self._debug:
+                    self._progress_callback(
+                        {"stage": "debug", "message": f"Using device: {device}"}
+                    )
 
-            self.whisper_model = whisper.load_model(
-                self.config.whisper_model,
-                device=device
-            )
+            self.whisper_model = whisper.load_model(self.config.whisper_model, device=device)
 
-            if hasattr(self, '_progress_callback') and self._debug:
-                self._progress_callback({
-                    'stage': 'debug',
-                    'message': 'Whisper model loaded successfully'
-                })
+            if hasattr(self, "_progress_callback") and self._debug:
+                self._progress_callback(
+                    {"stage": "debug", "message": "Whisper model loaded successfully"}
+                )
 
     def _load_embedding_model(self):
         """Lazy load sentence transformer model.
@@ -94,14 +98,20 @@ class PodcastProcessor:
             # This model is better at capturing semantic meaning across languages
             # and produces higher quality sentence embeddings
             from sentence_transformers import SentenceTransformer
-            self.embedding_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
+
+            self.embedding_model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
 
     def _is_whisperkit_available(self) -> bool:
         """Check if whisperkit-cli is available on the system."""
-        return shutil.which('whisperkit-cli') is not None
+        return shutil.which("whisperkit-cli") is not None
 
-    def _transcribe_with_whisperkit(self, audio_path: str, language: Optional[str] = None,
-                                     progress_callback=None, debug: bool = False) -> str:
+    def _transcribe_with_whisperkit(
+        self,
+        audio_path: str,
+        language: Optional[str] = None,
+        progress_callback=None,
+        debug: bool = False,
+    ) -> str:
         """Transcribe audio using WhisperKit-CLI.
 
         Args:
@@ -114,39 +124,40 @@ class PodcastProcessor:
             Transcribed text
         """
         if progress_callback:
-            progress_callback({
-                'stage': 'transcription',
-                'message': 'Using WhisperKit-CLI for transcription (optimized for Apple Silicon)'
-            })
+            progress_callback(
+                {
+                    "stage": "transcription",
+                    "message": "Using WhisperKit-CLI for transcription (optimized for Apple Silicon)",
+                }
+            )
 
         # Build command
-        cmd = ['whisperkit-cli', 'transcribe', '--audio-path', audio_path]
+        cmd = ["whisperkit-cli", "transcribe", "--audio-path", audio_path]
 
         # Use model path directly to avoid ambiguity
         # WhisperKit models are stored in ~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/
         model_name = self.config.whisper_model
-        model_path = os.path.expanduser(f'~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/openai_whisper-{model_name}')
+        model_path = os.path.expanduser(
+            f"~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/openai_whisper-{model_name}"
+        )
 
         # Check if model exists locally, otherwise use --model to download
         if os.path.exists(model_path):
-            cmd.extend(['--model-path', model_path])
+            cmd.extend(["--model-path", model_path])
         else:
             # Let WhisperKit download the model using repo format
-            cmd.extend(['--model', f'argmaxinc/whisperkit-coreml_whisper-{model_name}'])
+            cmd.extend(["--model", f"argmaxinc/whisperkit-coreml_whisper-{model_name}"])
 
         # Add language if specified
         if language:
-            cmd.extend(['--language', language])
+            cmd.extend(["--language", language])
 
         # Enable verbose mode for debug
         if debug:
-            cmd.append('--verbose')
+            cmd.append("--verbose")
 
         if debug and progress_callback:
-            progress_callback({
-                'stage': 'debug',
-                'message': f'WhisperKit command: {" ".join(cmd)}'
-            })
+            progress_callback({"stage": "debug", "message": f"WhisperKit command: {' '.join(cmd)}"})
 
         try:
             # Run the command and capture output
@@ -155,42 +166,37 @@ class PodcastProcessor:
                 capture_output=True,
                 text=True,
                 timeout=3600,  # 1 hour timeout for very long files
-                check=True
+                check=True,
             )
 
             # WhisperKit-CLI outputs the transcript to stdout
             transcript = result.stdout.strip()
 
             if progress_callback:
-                progress_callback({
-                    'stage': 'transcription',
-                    'message': f'WhisperKit transcription complete: {len(transcript)} chars'
-                })
+                progress_callback(
+                    {
+                        "stage": "transcription",
+                        "message": f"WhisperKit transcription complete: {len(transcript)} chars",
+                    }
+                )
 
             if debug and progress_callback and result.stderr:
-                progress_callback({
-                    'stage': 'debug',
-                    'message': f'WhisperKit stderr: {result.stderr}'
-                })
+                progress_callback(
+                    {"stage": "debug", "message": f"WhisperKit stderr: {result.stderr}"}
+                )
 
             return transcript
 
         except subprocess.TimeoutExpired as e:
-            error_msg = f'WhisperKit transcription timeout after 1 hour'
+            error_msg = f"WhisperKit transcription timeout after 1 hour"
             if progress_callback:
-                progress_callback({
-                    'stage': 'error',
-                    'message': error_msg
-                })
+                progress_callback({"stage": "error", "message": error_msg})
             raise Exception(error_msg) from e
 
         except subprocess.CalledProcessError as e:
-            error_msg = f'WhisperKit failed: {e.stderr}'
+            error_msg = f"WhisperKit failed: {e.stderr}"
             if progress_callback:
-                progress_callback({
-                    'stage': 'error',
-                    'message': error_msg
-                })
+                progress_callback({"stage": "error", "message": error_msg})
             raise Exception(error_msg) from e
 
     def _download_audio(self, url: str) -> str:
@@ -199,7 +205,7 @@ class PodcastProcessor:
         response.raise_for_status()
 
         # Create temp file with .mp3 extension for whisper
-        temp = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
+        temp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
         for chunk in response.iter_content(chunk_size=8192):
             temp.write(chunk)
         temp.close()
@@ -216,60 +222,69 @@ class PodcastProcessor:
             Processed transcript text
         """
         if progress_callback:
-            progress_callback({
-                'stage': 'downloading_transcript',
-                'message': f'Downloading external transcript from {transcript_url}'
-            })
+            progress_callback(
+                {
+                    "stage": "downloading_transcript",
+                    "message": f"Downloading external transcript from {transcript_url}",
+                }
+            )
 
         response = requests.get(transcript_url, timeout=60)
         response.raise_for_status()
-        content_type = response.headers.get('Content-Type', '').lower()
+        content_type = response.headers.get("Content-Type", "").lower()
 
         if progress_callback:
-            progress_callback({
-                'stage': 'processing_transcript',
-                'message': f'Processing external transcript (format: {content_type})'
-            })
+            progress_callback(
+                {
+                    "stage": "processing_transcript",
+                    "message": f"Processing external transcript (format: {content_type})",
+                }
+            )
 
         # Process different transcript formats
-        if 'json' in content_type or transcript_url.endswith('.json'):
+        if "json" in content_type or transcript_url.endswith(".json"):
             # Try to parse JSON transcript (common format)
             try:
                 data = response.json()
                 # Handle different JSON transcript formats
-                if isinstance(data, list) and all('text' in item for item in data):
+                if isinstance(data, list) and all("text" in item for item in data):
                     # Format with list of segments with text
-                    return ' '.join(item['text'] for item in data)
-                elif 'transcript' in data:
+                    return " ".join(item["text"] for item in data)
+                elif "transcript" in data:
                     # Simple format with transcript field
-                    return data['transcript']
-                elif 'results' in data and 'transcripts' in data['results']:
+                    return data["transcript"]
+                elif "results" in data and "transcripts" in data["results"]:
                     # AWS Transcribe format
-                    return data['results']['transcripts'][0]['transcript']
+                    return data["results"]["transcripts"][0]["transcript"]
                 else:
                     # Unknown format, return the raw text
                     return json.dumps(data)
             except json.JSONDecodeError:
                 # If JSON parsing fails, treat as plain text
                 return response.text
-        elif 'text/vtt' in content_type or transcript_url.endswith('.vtt'):
+        elif "text/vtt" in content_type or transcript_url.endswith(".vtt"):
             # WebVTT format
             lines = []
             for line in response.text.splitlines():
                 # Skip WebVTT headers, timestamps, and empty lines
-                if not line.strip() or line.startswith('WEBVTT') or '-->' in line or line[0].isdigit():
+                if (
+                    not line.strip()
+                    or line.startswith("WEBVTT")
+                    or "-->" in line
+                    or line[0].isdigit()
+                ):
                     continue
                 lines.append(line)
-            return ' '.join(lines)
-        elif 'text/srt' in content_type or transcript_url.endswith('.srt'):
+            return " ".join(lines)
+        elif "text/srt" in content_type or transcript_url.endswith(".srt"):
             # SRT format
             lines = []
             for line in response.text.splitlines():
                 # Skip SRT headers, timestamps, and empty lines
-                if not line.strip() or '-->' in line or line[0].isdigit():
+                if not line.strip() or "-->" in line or line[0].isdigit():
                     continue
                 lines.append(line)
-            return ' '.join(lines)
+            return " ".join(lines)
         else:
             # Default to plain text
             return response.text
@@ -300,11 +315,8 @@ Respond with just the domain name, nothing else."""
             json={
                 "model": self.config.openrouter_processing_model,
                 "max_tokens": 16384,  # Allow longer outputs for full transcript correction
-                "messages": [{
-                    "role": "user",
-                    "content": prompt
-                }]
-            }
+                "messages": [{"role": "user", "content": prompt}],
+            },
         )
         response.raise_for_status()
         response_data = response.json()
@@ -336,7 +348,7 @@ Respond with just the domain name, nothing else."""
                 if end_pos < len(transcript):
                     # Look for ". " within the last 500 characters of the chunk
                     search_start = max(end_pos - 500, current_pos)
-                    last_period = transcript.rfind('. ', search_start, end_pos)
+                    last_period = transcript.rfind(". ", search_start, end_pos)
                     if last_period > current_pos:
                         end_pos = last_period + 2  # Include the period and space
 
@@ -352,11 +364,13 @@ Respond with just the domain name, nothing else."""
         all_changes = []
 
         for i, chunk in enumerate(chunks):
-            if hasattr(self, '_progress_callback') and self._progress_callback and len(chunks) > 1:
-                self._progress_callback({
-                    'stage': 'transcript_correction',
-                    'message': f'Correcting chunk {i+1}/{len(chunks)}...'
-                })
+            if hasattr(self, "_progress_callback") and self._progress_callback and len(chunks) > 1:
+                self._progress_callback(
+                    {
+                        "stage": "transcript_correction",
+                        "message": f"Correcting chunk {i + 1}/{len(chunks)}...",
+                    }
+                )
 
             # Prompt for domain-specific correction
             prompt = f"""You are a professional transcriptionist with extensive expertise in {domain}. Your task is to correct any technical terms, jargon, or domain-specific language in this transcript that might have been misinterpreted during speech-to-text conversion.
@@ -386,11 +400,8 @@ CHANGES MADE:
                 json={
                     "model": self.config.openrouter_processing_model,
                     "max_tokens": 16384,  # Allow longer outputs for full transcript correction
-                    "messages": [{
-                        "role": "user",
-                        "content": prompt
-                    }]
-                }
+                    "messages": [{"role": "user", "content": prompt}],
+                },
             )
             response.raise_for_status()
             response_data = response.json()
@@ -421,8 +432,8 @@ CHANGES MADE:
                     "Transcript corrections involved",  # Also check without newline
                     "\nKey corrections:",
                     "\n- List each significant correction",
-                    "\n- \"",  # Often corrections start with bullet points and quotes
-                    "\nOverall transcription accuracy"
+                    '\n- "',  # Often corrections start with bullet points and quotes
+                    "\nOverall transcription accuracy",
                 ]
 
                 corrected_transcript = content
@@ -433,51 +444,66 @@ CHANGES MADE:
 
                 # Remove any remaining correction headers
                 if corrected_transcript.startswith("CORRECTED TRANSCRIPT:"):
-                    corrected_transcript = corrected_transcript.replace("CORRECTED TRANSCRIPT:", "").strip()
+                    corrected_transcript = corrected_transcript.replace(
+                        "CORRECTED TRANSCRIPT:", ""
+                    ).strip()
 
                 # Additional cleanup: remove any lines that look like correction metadata
-                lines = corrected_transcript.split('\n')
+                lines = corrected_transcript.split("\n")
                 cleaned_lines = []
                 for line in lines:
                     line_lower = line.lower().strip()
                     # Skip lines that contain correction metadata patterns
-                    if any(pattern in line_lower for pattern in [
-                        'transcript corrections involved',
-                        'key corrections:',
-                        'changes made:',
-                        'corrections largely aimed',
-                        'overall transcription accuracy',
-                        'requiring minimal changes',
-                        'was corrected for',
-                        'replaced "',
-                        'changed for alignment',
-                        'adjusted for scientific',
-                        'full name provided for'
-                    ]):
+                    if any(
+                        pattern in line_lower
+                        for pattern in [
+                            "transcript corrections involved",
+                            "key corrections:",
+                            "changes made:",
+                            "corrections largely aimed",
+                            "overall transcription accuracy",
+                            "requiring minimal changes",
+                            "was corrected for",
+                            'replaced "',
+                            "changed for alignment",
+                            "adjusted for scientific",
+                            "full name provided for",
+                        ]
+                    ):
                         continue
                     cleaned_lines.append(line)
 
-                corrected_transcript = '\n'.join(cleaned_lines).strip()
+                corrected_transcript = "\n".join(cleaned_lines).strip()
                 changes = "Response format not as expected"
 
             corrected_chunks.append(corrected_transcript)
-            if changes and changes != "No changes were needed" and changes != "Response format not as expected":
-                all_changes.append(f"Chunk {i+1}: {changes}")
+            if (
+                changes
+                and changes != "No changes were needed"
+                and changes != "Response format not as expected"
+            ):
+                all_changes.append(f"Chunk {i + 1}: {changes}")
 
         # Combine all corrected chunks
-        final_transcript = ' '.join(corrected_chunks)
+        final_transcript = " ".join(corrected_chunks)
 
         # Report changes
-        if hasattr(self, '_progress_callback') and self._progress_callback:
-            changes_summary = '\n'.join(all_changes) if all_changes else "No significant changes made"
-            self._progress_callback({
-                'stage': 'transcript_correction',
-                'message': f"Domain Expert: {domain}\nProcessed {len(chunks)} chunk(s)\nChanges Made:\n{changes_summary}"
-            })
+        if hasattr(self, "_progress_callback") and self._progress_callback:
+            changes_summary = (
+                "\n".join(all_changes) if all_changes else "No significant changes made"
+            )
+            self._progress_callback(
+                {
+                    "stage": "transcript_correction",
+                    "message": f"Domain Expert: {domain}\nProcessed {len(chunks)} chunk(s)\nChanges Made:\n{changes_summary}",
+                }
+            )
 
         return final_transcript
 
-    def _transcribe_audio(self, audio_path: str, title: str, progress_callback=None, debug: bool = False) -> str:
+    def _transcribe_audio(
+        self, audio_path: str, title: str, progress_callback=None, debug: bool = False
+    ) -> str:
         """Transcribe audio file using whisper with configured options and process with domain expertise.
 
         Prefers WhisperKit-CLI if available (optimized for Apple Silicon), falls back to Python Whisper.
@@ -489,43 +515,52 @@ CHANGES MADE:
         # Try WhisperKit-CLI first (optimized for Apple Silicon)
         if self._is_whisperkit_available():
             if progress_callback:
-                progress_callback({
-                    'stage': 'transcription',
-                    'message': 'WhisperKit-CLI detected, using optimized transcription'
-                })
+                progress_callback(
+                    {
+                        "stage": "transcription",
+                        "message": "WhisperKit-CLI detected, using optimized transcription",
+                    }
+                )
 
             try:
                 initial_transcript = self._transcribe_with_whisperkit(
                     audio_path,
                     language=self.config.whisper_language,
                     progress_callback=progress_callback,
-                    debug=debug
+                    debug=debug,
                 )
 
                 # Track "audio duration" for cost tracking (approximate based on transcript)
                 # WhisperKit doesn't provide segment data, so we estimate
                 if self.config.cost_tracking_enabled:
                     from .cost_tracker import track_api_call
+
                     # Estimate duration: ~150 words/min, ~5 chars/word = 750 chars/min
                     estimated_duration = len(initial_transcript) / 750 * 60
-                    track_api_call({}, f"whisperkit/{self.config.whisper_model}", estimated_duration)
+                    track_api_call(
+                        {}, f"whisperkit/{self.config.whisper_model}", estimated_duration
+                    )
 
                 # Skip to the correction/return logic below
                 use_python_whisper = False
 
             except Exception as e:
                 if progress_callback:
-                    progress_callback({
-                        'stage': 'warning',
-                        'message': f'WhisperKit-CLI failed ({str(e)}), falling back to Python Whisper'
-                    })
+                    progress_callback(
+                        {
+                            "stage": "warning",
+                            "message": f"WhisperKit-CLI failed ({str(e)}), falling back to Python Whisper",
+                        }
+                    )
                 use_python_whisper = True
         else:
             if progress_callback and debug:
-                progress_callback({
-                    'stage': 'debug',
-                    'message': 'WhisperKit-CLI not found, using Python Whisper library'
-                })
+                progress_callback(
+                    {
+                        "stage": "debug",
+                        "message": "WhisperKit-CLI not found, using Python Whisper library",
+                    }
+                )
             use_python_whisper = True
 
         # Fall back to Python Whisper if needed
@@ -535,21 +570,21 @@ CHANGES MADE:
             # Prepare transcription options
             options = {}
             if self.config.whisper_language:
-                options['language'] = self.config.whisper_language
+                options["language"] = self.config.whisper_language
 
             # Set number of threads for transcription
-            if hasattr(self.config, 'num_threads'):
-                options['num_threads'] = self.config.num_threads
+            if hasattr(self.config, "num_threads"):
+                options["num_threads"] = self.config.num_threads
 
             if debug and progress_callback:
-                progress_callback({
-                    'stage': 'debug',
-                    'message': f'Transcription options: {options}'
-                })
+                progress_callback(
+                    {"stage": "debug", "message": f"Transcription options: {options}"}
+                )
 
             # Create a wrapper for tqdm that updates our progress (Python Whisper only)
             if progress_callback:
                 from tqdm import tqdm
+
                 original_tqdm = tqdm.__init__
                 last_update_time = [time.time()]
 
@@ -564,19 +599,19 @@ CHANGES MADE:
                         if current_time - last_update_time[0] >= 0.5:
                             self._original_update(n)
                             progress_info = {
-                                'stage': 'transcribing_progress',
-                                'progress': self.n / self.total if self.total else 0
+                                "stage": "transcribing_progress",
+                                "progress": self.n / self.total if self.total else 0,
                             }
 
                             if debug:
                                 elapsed = current_time - self._start_time
                                 rate = self.n / elapsed if elapsed > 0 else 0
                                 eta = (self.total - self.n) / rate if rate > 0 else 0
-                                progress_info['debug'] = (
-                                    f'frames={self.n}/{self.total} | '
-                                    f'rate={rate:.1f} frames/s | '
-                                    f'elapsed={elapsed:.1f}s | '
-                                    f'eta={eta:.1f}s'
+                                progress_info["debug"] = (
+                                    f"frames={self.n}/{self.total} | "
+                                    f"rate={rate:.1f} frames/s | "
+                                    f"elapsed={elapsed:.1f}s | "
+                                    f"eta={eta:.1f}s"
                                 )
 
                             self.progress_callback(progress_info)
@@ -588,10 +623,12 @@ CHANGES MADE:
 
             try:
                 if debug and progress_callback:
-                    progress_callback({
-                        'stage': 'debug',
-                        'message': f'Starting transcription of {os.path.basename(audio_path)}'
-                    })
+                    progress_callback(
+                        {
+                            "stage": "debug",
+                            "message": f"Starting transcription of {os.path.basename(audio_path)}",
+                        }
+                    )
 
                 # Get initial transcript from Whisper
                 result = self.whisper_model.transcribe(audio_path, **options)
@@ -599,20 +636,30 @@ CHANGES MADE:
                 # Track audio duration for cost tracking
                 if self.config.cost_tracking_enabled:
                     from .cost_tracker import track_api_call
-                    track_api_call({}, f"whisper/{self.config.whisper_model}", result.get('segments', [{}])[-1].get('end', 0))
+
+                    track_api_call(
+                        {},
+                        f"whisper/{self.config.whisper_model}",
+                        result.get("segments", [{}])[-1].get("end", 0),
+                    )
 
                 if progress_callback:
-                    progress_callback({
-                        'stage': 'transcription',
-                        'message': f'Raw transcript length: {len(result["text"])} chars'
-                    })
+                    progress_callback(
+                        {
+                            "stage": "transcription",
+                            "message": f"Raw transcript length: {len(result['text'])} chars",
+                        }
+                    )
             except Exception as e:
                 if debug and progress_callback:
                     import traceback
-                    progress_callback({
-                        'stage': 'debug',
-                        'message': f'Transcription error: {str(e)}\n{traceback.format_exc()}'
-                    })
+
+                    progress_callback(
+                        {
+                            "stage": "debug",
+                            "message": f"Transcription error: {str(e)}\n{traceback.format_exc()}",
+                        }
+                    )
                 raise
 
             # Restore original tqdm if we modified it
@@ -629,29 +676,32 @@ CHANGES MADE:
 
             # Detect the domain/topic
             if progress_callback:
-                progress_callback({
-                    'stage': 'domain_detection',
-                    'message': 'Detecting podcast domain for specialized transcript correction...'
-                })
+                progress_callback(
+                    {
+                        "stage": "domain_detection",
+                        "message": "Detecting podcast domain for specialized transcript correction...",
+                    }
+                )
             domain = self._detect_topic(title, transcript_sample)
             if progress_callback:
-                progress_callback({
-                    'stage': 'domain_detected',
-                    'message': f'Detected domain: {domain}'
-                })
+                progress_callback(
+                    {"stage": "domain_detected", "message": f"Detected domain: {domain}"}
+                )
 
             # Correct the transcript using domain expertise
             corrected_transcript = self._correct_transcript(initial_transcript, domain)
             return corrected_transcript
         else:
             if progress_callback:
-                progress_callback({
-                    'stage': 'transcription',
-                    'message': 'Transcript correction disabled, using raw transcript'
-                })
+                progress_callback(
+                    {
+                        "stage": "transcription",
+                        "message": "Transcript correction disabled, using raw transcript",
+                    }
+                )
             return initial_transcript
 
-    def _generate_embedding(self, text: str, normalize: bool = True) -> 'np.ndarray':
+    def _generate_embedding(self, text: str, normalize: bool = True) -> "np.ndarray":
         """Generate vector embedding for text.
 
         Args:
@@ -665,6 +715,7 @@ CHANGES MADE:
         embedding = self.embedding_model.encode([text])[0]
         if normalize:
             import numpy as np
+
             embedding = embedding / np.linalg.norm(embedding)
         return embedding
 
@@ -674,6 +725,7 @@ CHANGES MADE:
             return "No OpenRouter API key configured. Summary not available."
 
         import requests
+
         # Import cost tracker here to avoid circular imports
         from .cost_tracker import track_api_call
 
@@ -688,11 +740,13 @@ CHANGES MADE:
             json={
                 "model": self.config.openrouter_model,
                 "max_tokens": 8192,  # Allow longer summary outputs
-                "messages": [{
-                    "role": "user",
-                    "content": self.config.openrouter_prompt.format(transcript=transcript)
-                }]
-            }
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": self.config.openrouter_prompt.format(transcript=transcript),
+                    }
+                ],
+            },
         )
 
         response.raise_for_status()
@@ -706,11 +760,11 @@ CHANGES MADE:
 
     def _get_value_analysis(self, transcript: str, episode=None):
         """Get value analysis using OpenRouter if enabled.
-        
+
         Args:
             transcript: The transcript to analyze
             episode: Optional Episode object to populate with rating data
-            
+
         Returns:
             Formatted text for display/template use
         """
@@ -719,6 +773,7 @@ CHANGES MADE:
 
         import requests
         import json as json_module
+
         # Import cost tracker here to avoid circular imports
         from .cost_tracker import track_api_call
 
@@ -733,11 +788,13 @@ CHANGES MADE:
             json={
                 "model": self.config.openrouter_model,
                 "max_tokens": 4096,  # Allow adequate output for value analysis
-                "messages": [{
-                    "role": "user",
-                    "content": self.config.value_prompt.format(transcript=transcript)
-                }]
-            }
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": self.config.value_prompt.format(transcript=transcript),
+                    }
+                ],
+            },
         )
 
         response.raise_for_status()
@@ -748,13 +805,13 @@ CHANGES MADE:
             track_api_call(response_data, self.config.openrouter_model)
 
         raw_content = response_data["choices"][0]["message"]["content"]
-        
+
         # Try to parse the JSON response to extract structured data
         if episode:
             try:
                 # Parse the JSON response
                 analysis_data = json_module.loads(raw_content)
-                
+
                 # Extract rating (tier) from "rating:" field, extract just the tier letter
                 if "rating:" in analysis_data:
                     rating_text = analysis_data["rating:"]
@@ -764,60 +821,62 @@ CHANGES MADE:
                     elif "A Tier" in rating_text:
                         episode.rating = "A"
                     elif "B Tier" in rating_text:
-                        episode.rating = "B"  
+                        episode.rating = "B"
                     elif "C Tier" in rating_text:
                         episode.rating = "C"
                     elif "D Tier" in rating_text:
                         episode.rating = "D"
-                
+
                 # Extract quality score
                 if "quality-score" in analysis_data:
                     try:
                         episode.quality_score = int(analysis_data["quality-score"])
                     except (ValueError, TypeError):
                         episode.quality_score = None
-                
+
                 # Extract labels
                 if "labels" in analysis_data:
                     episode.labels = analysis_data["labels"]
-                    
+
             except (json_module.JSONDecodeError, KeyError, TypeError) as e:
                 # If parsing fails, just continue without setting the structured data
-                if hasattr(self, '_progress_callback') and self._progress_callback:
-                    self._progress_callback({
-                        'stage': 'warning',
-                        'message': f'Failed to parse value analysis JSON: {str(e)}'
-                    })
+                if hasattr(self, "_progress_callback") and self._progress_callback:
+                    self._progress_callback(
+                        {
+                            "stage": "warning",
+                            "message": f"Failed to parse value analysis JSON: {str(e)}",
+                        }
+                    )
 
         return raw_content
 
     def _make_safe_filename(self, s: str) -> str:
         """Convert string to a safe filename that's safe for macOS."""
         # Remove content within brackets and parentheses
-        s = re.sub(r'\s*\[[^\]]*\]\s*', '', s)  # Remove [content]
-        s = re.sub(r'\s*\([^\)]*\)\s*', '', s)  # Remove (content)
+        s = re.sub(r"\s*\[[^\]]*\]\s*", "", s)  # Remove [content]
+        s = re.sub(r"\s*\([^\)]*\)\s*", "", s)  # Remove (content)
 
         # Remove or replace unsafe characters for macOS
         # macOS doesn't allow these characters: /, :, [], |, ^, #
         # The colon (:) is especially problematic on macOS
-        s = re.sub(r'[<>:"/\\|?*\[\]\|\^#]', '', s)  # Remove all unsafe chars including colon
+        s = re.sub(r'[<>:"/\\|?*\[\]\|\^#]', "", s)  # Remove all unsafe chars including colon
 
         # Replace multiple spaces with single space
-        s = re.sub(r'\s+', ' ', s)
+        s = re.sub(r"\s+", " ", s)
 
         # Remove leading/trailing spaces and dots
-        s = s.strip('. ')
+        s = s.strip(". ")
 
         # macOS has issues with files starting with a dot (hidden files)
-        if s.startswith('.'):
-            s = 'file_' + s
+        if s.startswith("."):
+            s = "file_" + s
 
         # macOS doesn't like filenames ending with a space
         s = s.rstrip()
 
         # macOS doesn't like filenames that are just a dot
-        if s in ['.', '..'] or not s:
-            s = 'untitled_file'
+        if s in [".", ".."] or not s:
+            s = "untitled_file"
 
         # Ensure filename isn't too long (max 255 bytes in UTF-8 for macOS)
         # Using 240 to be safe with UTF-8 encoding and extension
@@ -836,6 +895,7 @@ CHANGES MADE:
             title: Optional episode title to use for lookup in Apple Podcasts database
         """
         from .apple_podcasts import get_podcast_app_url
+
         return get_podcast_app_url(audio_url, guid, title)
 
     def _write_to_obsidian(self, episode: Episode):
@@ -859,19 +919,27 @@ CHANGES MADE:
         summary = self._get_summary(episode.transcript) if episode.transcript else ""
 
         # Get value analysis if enabled and populate episode rating data
-        value_analysis = self._get_value_analysis(episode.transcript, episode) if episode.transcript else ""
+        value_analysis = (
+            self._get_value_analysis(episode.transcript, episode) if episode.transcript else ""
+        )
 
         # Calculate transcript word count if transcript exists
         transcript_wordcount = len(episode.transcript.split()) if episode.transcript else 0
 
         # Extract podcast app URL using audio URL, GUID, and title
-        podcasts_app_url = self._get_podcast_app_url(episode.audio_url, episode.guid, episode.title) if episode.audio_url else "N/A"
+        podcasts_app_url = (
+            self._get_podcast_app_url(episode.audio_url, episode.guid, episode.title)
+            if episode.audio_url
+            else "N/A"
+        )
 
         # Format note using template
         note_content = self.config.note_template.format(
             title=episode.title,
             podcast_title=episode.podcast.title,
-            published_at=episode.published_at.strftime('%Y-%m-%d') if episode.published_at else 'Unknown',
+            published_at=episode.published_at.strftime("%Y-%m-%d")
+            if episode.published_at
+            else "Unknown",
             audio_url=episode.audio_url,
             podcasts_app_url=podcasts_app_url,
             summary=summary,
@@ -879,18 +947,20 @@ CHANGES MADE:
             transcript=episode.transcript or "Transcript not available",
             episode_id=episode.id,
             episode_wordcount=transcript_wordcount,
-            podcast_guid=episode.guid
+            podcast_guid=episode.guid,
         )
 
         md_file = vault_path / filename
-        with md_file.open('w') as f:
+        with md_file.open("w") as f:
             f.write(note_content)
 
         # Mark episode as processed
         episode.processed_at = datetime.utcnow()
         self.db.commit()
 
-    def ingest_subscriptions(self, lookback_days: int = 7, progress_callback=None, debug: bool = False):
+    def ingest_subscriptions(
+        self, lookback_days: int = 7, progress_callback=None, debug: bool = False
+    ):
         """Ingest all Apple Podcast subscriptions and new episodes.
 
         Args:
@@ -903,37 +973,36 @@ CHANGES MADE:
                 - episode: dict with episode info (if stage == 'episode')
         """
         from datetime import datetime, timedelta
+
         cutoff_date = datetime.now() - timedelta(days=lookback_days)
         subscriptions = get_subscriptions()
 
         # Initial stats
         if progress_callback:
-            progress_callback({
-                'stage': 'init',
-                'total_podcasts': len(subscriptions)
-            })
-
+            progress_callback({"stage": "init", "total_podcasts": len(subscriptions)})
 
         for podcast_idx, sub in enumerate(subscriptions, 1):
             # Progress update for podcast
             if progress_callback:
-                progress_callback({
-                    'stage': 'podcast',
-                    'podcast': sub,
-                    'current': podcast_idx,
-                    'total': len(subscriptions)
-                })
+                progress_callback(
+                    {
+                        "stage": "podcast",
+                        "podcast": sub,
+                        "current": podcast_idx,
+                        "total": len(subscriptions),
+                    }
+                )
 
             # Add or update podcast
             try:
                 with self.db.no_autoflush:
-                    podcast = self.db.query(Podcast).filter_by(feed_url=sub['feed_url']).first()
+                    podcast = self.db.query(Podcast).filter_by(feed_url=sub["feed_url"]).first()
                     if not podcast:
                         podcast = Podcast(
-                            title=sub['title'],
-                            author=sub['author'],
-                            feed_url=sub['feed_url'],
-                            muted=False
+                            title=sub["title"],
+                            author=sub["author"],
+                            feed_url=sub["feed_url"],
+                            muted=False,
                         )
                         self.db.add(podcast)
                         self.db.commit()
@@ -941,52 +1010,58 @@ CHANGES MADE:
                     # Skip muted podcasts
                     if podcast.muted:
                         if progress_callback:
-                            progress_callback({
-                                'stage': 'skip',
-                                'message': f"Skipping muted podcast: {podcast.title}"
-                            })
+                            progress_callback(
+                                {
+                                    "stage": "skip",
+                                    "message": f"Skipping muted podcast: {podcast.title}",
+                                }
+                            )
                         continue
 
                     # Verify podcast was created successfully
-                    podcast = self.db.query(Podcast).filter_by(feed_url=sub['feed_url']).first()
+                    podcast = self.db.query(Podcast).filter_by(feed_url=sub["feed_url"]).first()
                     if not podcast or not podcast.title:
                         raise Exception("Failed to create/retrieve podcast")
             except Exception as e:
                 if progress_callback:
-                    progress_callback({
-                        'stage': 'error',
-                        'error': f"Failed to process podcast {sub['title']}: {str(e)}"
-                    })
+                    progress_callback(
+                        {
+                            "stage": "error",
+                            "error": f"Failed to process podcast {sub['title']}: {str(e)}",
+                        }
+                    )
                 continue
 
             # Parse feed
-            feed = feedparser.parse(sub['feed_url'])
+            feed = feedparser.parse(sub["feed_url"])
             recent_entries = []
 
             # First pass: collect recent entries
             for entry in feed.entries:
                 # Parse published date
-                published_at = datetime(*entry.published_parsed[:6]) if 'published_parsed' in entry else None
+                published_at = (
+                    datetime(*entry.published_parsed[:6]) if "published_parsed" in entry else None
+                )
                 if published_at and published_at >= cutoff_date:
                     recent_entries.append((entry, published_at))
 
             # Progress update for episodes
             if progress_callback and recent_entries:
-                progress_callback({
-                    'stage': 'episodes_found',
-                    'podcast': sub,
-                    'total': len(recent_entries)
-                })
+                progress_callback(
+                    {"stage": "episodes_found", "podcast": sub, "total": len(recent_entries)}
+                )
 
             # Process recent entries
             for entry_idx, (entry, published_at) in enumerate(recent_entries, 1):
                 # Check if episode exists
-                guid = entry.get('id', entry.get('link'))
+                guid = entry.get("id", entry.get("link"))
                 if not guid:
                     continue
 
                 # Parse published date
-                published_at = datetime(*entry.published_parsed[:6]) if 'published_parsed' in entry else None
+                published_at = (
+                    datetime(*entry.published_parsed[:6]) if "published_parsed" in entry else None
+                )
 
                 # Skip if too old or already exists
                 if not published_at or published_at < cutoff_date:
@@ -1007,22 +1082,27 @@ CHANGES MADE:
                 transcript_url = None
 
                 # Look for audio and transcript links
-                for link in entry.get('links', []):
-                    link_type = link.get('type', '').lower()
-                    if link_type.startswith('audio/'):
-                        audio_url = link['href']
-                    elif link_type in ['application/json', 'text/vtt', 'text/srt', 'text/plain'] or \
-                         link.get('rel', '') == 'transcript' or \
-                         'transcript' in link.get('href', '').lower():
-                        transcript_url = link['href']
+                for link in entry.get("links", []):
+                    link_type = link.get("type", "").lower()
+                    if link_type.startswith("audio/"):
+                        audio_url = link["href"]
+                    elif (
+                        link_type in ["application/json", "text/vtt", "text/srt", "text/plain"]
+                        or link.get("rel", "") == "transcript"
+                        or "transcript" in link.get("href", "").lower()
+                    ):
+                        transcript_url = link["href"]
 
                 # Also check for transcript in enclosures
-                if not transcript_url and 'enclosures' in entry:
-                    for enclosure in entry.get('enclosures', []):
-                        enclosure_type = enclosure.get('type', '').lower()
-                        if enclosure_type in ['application/json', 'text/vtt', 'text/srt', 'text/plain'] or \
-                           'transcript' in enclosure.get('href', '').lower():
-                            transcript_url = enclosure.get('href')
+                if not transcript_url and "enclosures" in entry:
+                    for enclosure in entry.get("enclosures", []):
+                        enclosure_type = enclosure.get("type", "").lower()
+                        if (
+                            enclosure_type
+                            in ["application/json", "text/vtt", "text/srt", "text/plain"]
+                            or "transcript" in enclosure.get("href", "").lower()
+                        ):
+                            transcript_url = enclosure.get("href")
                             break
 
                 # Skip if no audio URL found
@@ -1030,15 +1110,17 @@ CHANGES MADE:
                     continue
 
                 # Extract episode metadata safely
-                episode_title = entry.get('title')
+                episode_title = entry.get("title")
                 if not episode_title:
                     if progress_callback:
-                        progress_callback({
-                            'stage': 'error',
-                            'podcast': sub,
-                            'episode': {'title': 'Unknown'},
-                            'error': 'Episode missing title'
-                        })
+                        progress_callback(
+                            {
+                                "stage": "error",
+                                "podcast": sub,
+                                "episode": {"title": "Unknown"},
+                                "error": "Episode missing title",
+                            }
+                        )
                     continue
 
                 # Create new episode
@@ -1046,10 +1128,10 @@ CHANGES MADE:
                     episode = Episode(
                         guid=guid,
                         title=episode_title,
-                        description=entry.get('description', ''),
+                        description=entry.get("description", ""),
                         published_at=published_at,  # We already have this from earlier
                         audio_url=audio_url,
-                        transcript_url=transcript_url
+                        transcript_url=transcript_url,
                     )
 
                     # Add episode to session before setting relationships
@@ -1062,95 +1144,127 @@ CHANGES MADE:
                         raise Exception("Failed to establish podcast relationship")
                 except Exception as e:
                     if progress_callback:
-                        progress_callback({
-                            'stage': 'error',
-                            'error': f"Failed to create episode: {str(e)}"
-                        })
+                        progress_callback(
+                            {"stage": "error", "error": f"Failed to create episode: {str(e)}"}
+                        )
                     continue
 
                 try:
                     if progress_callback:
-                        progress_callback({
-                            'stage': 'episode_start',
-                            'podcast': sub,
-                            'episode': {
-                                'title': episode.title,
-                                'published_at': published_at
-                            },
-                            'current': entry_idx,
-                            'total': len(recent_entries)
-                        })
+                        progress_callback(
+                            {
+                                "stage": "episode_start",
+                                "podcast": sub,
+                                "episode": {"title": episode.title, "published_at": published_at},
+                                "current": entry_idx,
+                                "total": len(recent_entries),
+                            }
+                        )
 
                     # Download audio
                     if progress_callback:
-                        progress_callback({'stage': 'downloading', 'podcast': sub, 'episode': {'title': episode.title}})
+                        progress_callback(
+                            {
+                                "stage": "downloading",
+                                "podcast": sub,
+                                "episode": {"title": episode.title},
+                            }
+                        )
                     try:
                         start_time = time.time()
                         temp_path = self._download_audio(audio_url)
                         download_time = time.time() - start_time
 
                         if progress_callback:
-                            progress_callback({
-                                'stage': 'timing',
-                                'message': f'Audio download took {download_time:.2f} seconds'
-                            })
+                            progress_callback(
+                                {
+                                    "stage": "timing",
+                                    "message": f"Audio download took {download_time:.2f} seconds",
+                                }
+                            )
                     except requests.exceptions.RequestException as e:
                         raise Exception(f"Failed to download audio: {str(e)}")
 
                     # Check if we have an external transcript URL
                     if episode.transcript_url:
                         if progress_callback:
-                            progress_callback({
-                                'stage': 'external_transcript',
-                                'podcast': sub,
-                                'episode': {'title': episode.title},
-                                'message': f'Using external transcript from {episode.transcript_url}'
-                            })
+                            progress_callback(
+                                {
+                                    "stage": "external_transcript",
+                                    "podcast": sub,
+                                    "episode": {"title": episode.title},
+                                    "message": f"Using external transcript from {episode.transcript_url}",
+                                }
+                            )
                         try:
                             start_time = time.time()
-                            episode.transcript = self._download_transcript(episode.transcript_url, progress_callback)
-                            episode.transcript_source = 'external'
+                            episode.transcript = self._download_transcript(
+                                episode.transcript_url, progress_callback
+                            )
+                            episode.transcript_source = "external"
                             transcript_time = time.time() - start_time
 
                             if progress_callback:
-                                progress_callback({
-                                    'stage': 'timing',
-                                    'message': f'External transcript processing took {transcript_time:.2f} seconds'
-                                })
+                                progress_callback(
+                                    {
+                                        "stage": "timing",
+                                        "message": f"External transcript processing took {transcript_time:.2f} seconds",
+                                    }
+                                )
                         except Exception as e:
                             if progress_callback:
-                                progress_callback({
-                                    'stage': 'warning',
-                                    'message': f'Failed to use external transcript, falling back to Whisper: {str(e)}'
-                                })
+                                progress_callback(
+                                    {
+                                        "stage": "warning",
+                                        "message": f"Failed to use external transcript, falling back to Whisper: {str(e)}",
+                                    }
+                                )
                             # Fall back to Whisper transcription
                             episode.transcript_url = None
 
                     # If no external transcript or it failed, use Whisper
                     if not episode.transcript_url:
                         if progress_callback:
-                            progress_callback({
-                                'stage': 'info',
-                                'message': 'No external transcript found, falling back to local transcription'
-                            })
-                            progress_callback({'stage': 'transcribing', 'podcast': sub, 'episode': {'title': episode.title}})
+                            progress_callback(
+                                {
+                                    "stage": "info",
+                                    "message": "No external transcript found, falling back to local transcription",
+                                }
+                            )
+                            progress_callback(
+                                {
+                                    "stage": "transcribing",
+                                    "podcast": sub,
+                                    "episode": {"title": episode.title},
+                                }
+                            )
                         try:
                             start_time = time.time()
-                            episode.transcript = self._transcribe_audio(temp_path, episode.title, progress_callback, debug=debug)
-                            episode.transcript_source = 'whisper'
+                            episode.transcript = self._transcribe_audio(
+                                temp_path, episode.title, progress_callback, debug=debug
+                            )
+                            episode.transcript_source = "whisper"
                             transcribe_time = time.time() - start_time
 
                             if progress_callback:
-                                progress_callback({
-                                    'stage': 'timing',
-                                    'message': f'Audio transcription took {transcribe_time:.2f} seconds'
-                                })
+                                progress_callback(
+                                    {
+                                        "stage": "timing",
+                                        "message": f"Audio transcription took {transcribe_time:.2f} seconds",
+                                    }
+                                )
                         except Exception as e:
                             raise Exception(f"Failed to transcribe audio: {str(e)}")
 
                     # Generate embedding
                     if progress_callback:
-                        progress_callback({'stage': 'embedding', 'podcast': sub, 'episode': {'title': episode.title}})
+                        progress_callback(
+                            {
+                                "stage": "embedding",
+                                "podcast": sub,
+                                "episode": {"title": episode.title},
+                            }
+                        )
                     try:
                         start_time = time.time()
                         embedding = self._generate_embedding(episode.transcript)
@@ -1158,16 +1272,24 @@ CHANGES MADE:
                         embedding_time = time.time() - start_time
 
                         if progress_callback:
-                            progress_callback({
-                                'stage': 'timing',
-                                'message': f'Embedding generation took {embedding_time:.2f} seconds'
-                            })
+                            progress_callback(
+                                {
+                                    "stage": "timing",
+                                    "message": f"Embedding generation took {embedding_time:.2f} seconds",
+                                }
+                            )
                     except Exception as e:
                         raise Exception(f"Failed to generate embedding: {str(e)}")
 
                     # Write to Obsidian if configured
                     if progress_callback:
-                        progress_callback({'stage': 'exporting', 'podcast': sub, 'episode': {'title': episode.title}})
+                        progress_callback(
+                            {
+                                "stage": "exporting",
+                                "podcast": sub,
+                                "episode": {"title": episode.title},
+                            }
+                        )
                     try:
                         self._write_to_obsidian(episode)
                     except Exception as e:
@@ -1175,23 +1297,27 @@ CHANGES MADE:
 
                     # Report completion
                     if progress_callback:
-                        progress_callback({
-                            'stage': 'episode_complete',
-                            'podcast': sub,
-                            'episode': {'title': episode.title}
-                        })
+                        progress_callback(
+                            {
+                                "stage": "episode_complete",
+                                "podcast": sub,
+                                "episode": {"title": episode.title},
+                            }
+                        )
 
                     # Cleanup
                     os.unlink(temp_path)
                 except Exception as e:
                     print(f"Error processing episode {episode.title}: {e}")
                     if progress_callback:
-                        progress_callback({
-                            'stage': 'error',
-                            'podcast': sub,
-                            'episode': {'title': episode.title},
-                            'error': str(e)
-                        })
+                        progress_callback(
+                            {
+                                "stage": "error",
+                                "podcast": sub,
+                                "episode": {"title": episode.title},
+                                "error": str(e),
+                            }
+                        )
                     continue
 
                 self.db.add(episode)
@@ -1205,16 +1331,20 @@ CHANGES MADE:
                         index_time = time.time() - start_time
 
                         if progress_callback:
-                            progress_callback({
-                                'stage': 'timing',
-                                'message': f'Index rebuild took {index_time:.2f} seconds'
-                            })
+                            progress_callback(
+                                {
+                                    "stage": "timing",
+                                    "message": f"Index rebuild took {index_time:.2f} seconds",
+                                }
+                            )
                     except Exception as e:
                         if progress_callback:
-                            progress_callback({
-                                'stage': 'error',
-                                'message': f'Failed to rebuild search index: {str(e)}'
-                            })
+                            progress_callback(
+                                {
+                                    "stage": "error",
+                                    "message": f"Failed to rebuild search index: {str(e)}",
+                                }
+                            )
 
     def reingest_episode(self, episode_id: int, progress_callback=None, debug: bool = False):
         """Re-ingest a specific episode by ID, re-processing transcript and embeddings.
@@ -1233,14 +1363,16 @@ CHANGES MADE:
             raise Exception(f"Episode with ID {episode_id} not found")
 
         if progress_callback:
-            progress_callback({
-                'stage': 'episode_start',
-                'episode': {
-                    'id': episode.id,
-                    'title': episode.title,
-                    'published_at': episode.published_at
+            progress_callback(
+                {
+                    "stage": "episode_start",
+                    "episode": {
+                        "id": episode.id,
+                        "title": episode.title,
+                        "published_at": episode.published_at,
+                    },
                 }
-            })
+            )
 
         # Store original values for reference
         audio_url = episode.audio_url
@@ -1256,69 +1388,87 @@ CHANGES MADE:
         try:
             # Download audio
             if progress_callback:
-                progress_callback({'stage': 'downloading', 'episode': {'title': episode.title}})
+                progress_callback({"stage": "downloading", "episode": {"title": episode.title}})
 
             start_time = time.time()
             temp_path = self._download_audio(audio_url)
             download_time = time.time() - start_time
 
             if progress_callback:
-                progress_callback({
-                    'stage': 'timing',
-                    'message': f'Audio download took {download_time:.2f} seconds'
-                })
+                progress_callback(
+                    {
+                        "stage": "timing",
+                        "message": f"Audio download took {download_time:.2f} seconds",
+                    }
+                )
 
             # Check if we have an external transcript URL
             if episode.transcript_url:
                 if progress_callback:
-                    progress_callback({
-                        'stage': 'external_transcript',
-                        'episode': {'title': episode.title},
-                        'message': f'Using external transcript from {episode.transcript_url}'
-                    })
+                    progress_callback(
+                        {
+                            "stage": "external_transcript",
+                            "episode": {"title": episode.title},
+                            "message": f"Using external transcript from {episode.transcript_url}",
+                        }
+                    )
                 try:
                     start_time = time.time()
-                    episode.transcript = self._download_transcript(episode.transcript_url, progress_callback)
-                    episode.transcript_source = 'external'
+                    episode.transcript = self._download_transcript(
+                        episode.transcript_url, progress_callback
+                    )
+                    episode.transcript_source = "external"
                     transcript_time = time.time() - start_time
 
                     if progress_callback:
-                        progress_callback({
-                            'stage': 'timing',
-                            'message': f'External transcript processing took {transcript_time:.2f} seconds'
-                        })
+                        progress_callback(
+                            {
+                                "stage": "timing",
+                                "message": f"External transcript processing took {transcript_time:.2f} seconds",
+                            }
+                        )
                 except Exception as e:
                     if progress_callback:
-                        progress_callback({
-                            'stage': 'warning',
-                            'message': f'Failed to use external transcript, falling back to local transcription: {str(e)}'
-                        })
+                        progress_callback(
+                            {
+                                "stage": "warning",
+                                "message": f"Failed to use external transcript, falling back to local transcription: {str(e)}",
+                            }
+                        )
                     # Fall back to Whisper transcription
                     episode.transcript_url = None
 
             # If no external transcript or it failed, use local transcription
             if not episode.transcript_url:
                 if progress_callback:
-                    progress_callback({
-                        'stage': 'info',
-                        'message': 'No external transcript found, falling back to local transcription'
-                    })
-                    progress_callback({'stage': 'transcribing', 'episode': {'title': episode.title}})
+                    progress_callback(
+                        {
+                            "stage": "info",
+                            "message": "No external transcript found, falling back to local transcription",
+                        }
+                    )
+                    progress_callback(
+                        {"stage": "transcribing", "episode": {"title": episode.title}}
+                    )
 
                 start_time = time.time()
-                episode.transcript = self._transcribe_audio(temp_path, episode.title, progress_callback, debug=debug)
-                episode.transcript_source = 'whisper'
+                episode.transcript = self._transcribe_audio(
+                    temp_path, episode.title, progress_callback, debug=debug
+                )
+                episode.transcript_source = "whisper"
                 transcribe_time = time.time() - start_time
 
                 if progress_callback:
-                    progress_callback({
-                        'stage': 'timing',
-                        'message': f'Audio transcription took {transcribe_time:.2f} seconds'
-                    })
+                    progress_callback(
+                        {
+                            "stage": "timing",
+                            "message": f"Audio transcription took {transcribe_time:.2f} seconds",
+                        }
+                    )
 
             # Generate embedding
             if progress_callback:
-                progress_callback({'stage': 'embedding', 'episode': {'title': episode.title}})
+                progress_callback({"stage": "embedding", "episode": {"title": episode.title}})
 
             start_time = time.time()
             embedding = self._generate_embedding(episode.transcript)
@@ -1326,14 +1476,16 @@ CHANGES MADE:
             embedding_time = time.time() - start_time
 
             if progress_callback:
-                progress_callback({
-                    'stage': 'timing',
-                    'message': f'Embedding generation took {embedding_time:.2f} seconds'
-                })
+                progress_callback(
+                    {
+                        "stage": "timing",
+                        "message": f"Embedding generation took {embedding_time:.2f} seconds",
+                    }
+                )
 
             # Write to Obsidian if configured
             if progress_callback:
-                progress_callback({'stage': 'exporting', 'episode': {'title': episode.title}})
+                progress_callback({"stage": "exporting", "episode": {"title": episode.title}})
             self._write_to_obsidian(episode)
 
             # Mark as processed
@@ -1341,21 +1493,18 @@ CHANGES MADE:
 
             # Report completion
             if progress_callback:
-                progress_callback({
-                    'stage': 'episode_complete',
-                    'episode': {'title': episode.title}
-                })
+                progress_callback(
+                    {"stage": "episode_complete", "episode": {"title": episode.title}}
+                )
 
             # Cleanup temp audio file
             os.unlink(temp_path)
 
         except Exception as e:
             if progress_callback:
-                progress_callback({
-                    'stage': 'error',
-                    'episode': {'title': episode.title},
-                    'error': str(e)
-                })
+                progress_callback(
+                    {"stage": "error", "episode": {"title": episode.title}, "error": str(e)}
+                )
             raise Exception(f"Failed to re-ingest episode: {str(e)}")
 
         # Commit changes
@@ -1369,16 +1518,17 @@ CHANGES MADE:
                 index_time = time.time() - start_time
 
                 if progress_callback:
-                    progress_callback({
-                        'stage': 'timing',
-                        'message': f'Index rebuild took {index_time:.2f} seconds'
-                    })
+                    progress_callback(
+                        {
+                            "stage": "timing",
+                            "message": f"Index rebuild took {index_time:.2f} seconds",
+                        }
+                    )
             except Exception as e:
                 if progress_callback:
-                    progress_callback({
-                        'stage': 'error',
-                        'message': f'Failed to rebuild search index: {str(e)}'
-                    })
+                    progress_callback(
+                        {"stage": "error", "message": f"Failed to rebuild search index: {str(e)}"}
+                    )
 
     def _find_relevant_excerpt(self, query: str, transcript: str, context_chars: int = None) -> str:
         """Find the most relevant excerpt from the transcript for the given query.
@@ -1418,7 +1568,9 @@ CHANGES MADE:
             end = min(300, len(transcript))
         else:
             # Use the position with the most surrounding term matches
-            best_pos = max(positions, key=lambda p: sum(1 for pos in positions if abs(pos - p) < 200))
+            best_pos = max(
+                positions, key=lambda p: sum(1 for pos in positions if abs(pos - p) < 200)
+            )
             start = max(0, best_pos - context_chars)
             end = min(len(transcript), best_pos + context_chars)
 
@@ -1431,13 +1583,11 @@ CHANGES MADE:
 
         # Ensure we don't break in the middle of a word
         if prefix:
-            excerpt = excerpt[excerpt.find(" ")+1:]
+            excerpt = excerpt[excerpt.find(" ") + 1 :]
         if suffix:
-            excerpt = excerpt[:excerpt.rfind(" ")]
+            excerpt = excerpt[: excerpt.rfind(" ")]
 
         return prefix + excerpt + suffix
-
-
 
     def _init_annoy_index(self, force_rebuild: bool = False) -> None:
         """Initialize or load the Annoy index.
@@ -1453,11 +1603,14 @@ CHANGES MADE:
 
         # Create new index
         from annoy import AnnoyIndex
+
         self.annoy_index = AnnoyIndex(embedding_dim, self.config.annoy_metric)
 
         # Load existing index if it exists and we're not forcing a rebuild
         index_path = self.config.annoy_index_path
-        episodes_with_embeddings = self.db.query(Episode).filter(Episode.vector_embedding.isnot(None)).all()
+        episodes_with_embeddings = (
+            self.db.query(Episode).filter(Episode.vector_embedding.isnot(None)).all()
+        )
 
         if os.path.exists(index_path) and not force_rebuild:
             self.annoy_index.load(index_path)
@@ -1473,6 +1626,7 @@ CHANGES MADE:
         self.episode_map = {}
         for episode in episodes_with_embeddings:
             import numpy as np
+
             idx = len(self.episode_map)
             self.episode_map[idx] = episode.id
             self.annoy_index.add_item(idx, np.array(json.loads(episode.vector_embedding)))
@@ -1506,9 +1660,12 @@ CHANGES MADE:
         query_embedding = self._generate_embedding(query)
 
         # Get nearest neighbors from Annoy
-        n_results = min(limit * 2, self.annoy_index.get_n_items())  # Get extra results for filtering
+        n_results = min(
+            limit * 2, self.annoy_index.get_n_items()
+        )  # Get extra results for filtering
         indices, distances = self.annoy_index.get_nns_by_vector(
-            query_embedding, n_results, include_distances=True)
+            query_embedding, n_results, include_distances=True
+        )
 
         # Convert distances to similarities (Annoy returns squared L2 distance for 'angular')
         similarities = [1 - (d / 2) for d in distances]  # Convert to cosine similarity
@@ -1520,7 +1677,9 @@ CHANGES MADE:
 
         # Batch fetch all potential episodes
         episode_ids = [self.episode_map[idx] for idx in indices]
-        episodes = {e.id: e for e in self.db.query(Episode).filter(Episode.id.in_(episode_ids)).all()}
+        episodes = {
+            e.id: e for e in self.db.query(Episode).filter(Episode.id.in_(episode_ids)).all()
+        }
 
         for idx, similarity in zip(indices, similarities):
             if similarity < relevance_threshold:
@@ -1533,7 +1692,7 @@ CHANGES MADE:
 
             # Get episode metadata
             title = episode.title
-            description = episode.description or ''
+            description = episode.description or ""
             podcast_title = episode.podcast.title
 
             # Create rich text representation for better context
@@ -1552,62 +1711,227 @@ CHANGES MADE:
                 # Find most relevant excerpt
                 excerpt = self._find_relevant_excerpt(query, episode.transcript)
 
-                results.append({
-                    'episode': episode,
-                    'similarity': combined_score,
-                    'excerpt': excerpt
-                })
+                results.append(
+                    {"episode": episode, "similarity": combined_score, "excerpt": excerpt}
+                )
 
         # Sort by combined score and return top results
-        results.sort(key=lambda x: x['similarity'], reverse=True)
+        results.sort(key=lambda x: x["similarity"], reverse=True)
         return [
             {
-                'podcast': r['episode'].podcast.title,
-                'episode': r['episode'].title,
-                'excerpt': r['excerpt'],
-                'published_at': r['episode'].published_at,
-                'similarity': round(r['similarity'] * 100),  # Convert to percentage
-                'id': r['episode'].id  # Add episode ID
+                "podcast": r["episode"].podcast.title,
+                "episode": r["episode"].title,
+                "excerpt": r["excerpt"],
+                "published_at": r["episode"].published_at,
+                "similarity": round(r["similarity"] * 100),  # Convert to percentage
+                "id": r["episode"].id,  # Add episode ID
             }
             for r in results[:limit]
         ]
 
+    def search_time_filtered(
+        self, query: str, days: int = 7, limit: int = 5, relevance_threshold: float = 0.25
+    ) -> List[Dict]:
+        """Search with a time window filter on published_at.
+
+        Over-fetches from the Annoy index then post-filters by date to avoid
+        modifying the core search path.
+
+        Args:
+            query: Natural language search query
+            days: Number of days to look back from now
+            limit: Maximum results to return after filtering
+            relevance_threshold: Minimum similarity score (0.0 to 1.0)
+
+        Returns:
+            List of search result dicts within the time window
+        """
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        # Over-fetch to compensate for date filtering
+        raw_results = self.search(query, limit=limit * 3, relevance_threshold=relevance_threshold)
+        filtered = [r for r in raw_results if r.get("published_at") and r["published_at"] >= cutoff]
+        return filtered[:limit]
+
+    def generate_briefing(
+        self,
+        days: int = None,
+        categories: List[str] = None,
+        category_labels: List[str] = None,
+        results_per_category: int = None,
+        relevance_threshold: int = None,
+        progress_callback=None,
+    ) -> str:
+        """Generate a personalized news briefing from recent podcast content.
+
+        Runs semantic search across multiple interest categories, deduplicates,
+        and synthesizes the results into a briefing via OpenRouter.
+
+        Args:
+            days: Lookback window in days (default from config)
+            categories: List of search query strings per category
+            category_labels: Display labels for each category
+            results_per_category: Max results per category
+            relevance_threshold: Minimum relevance 0-100
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Formatted briefing string from LLM synthesis
+        """
+        # Fall back to config defaults
+        days = days or self.config.briefing_default_days
+        categories = categories or self.config.briefing_categories
+        category_labels = category_labels or self.config.briefing_category_labels
+        results_per_category = results_per_category or self.config.briefing_results_per_category
+        relevance_threshold = (
+            relevance_threshold
+            if relevance_threshold is not None
+            else self.config.briefing_relevance_threshold
+        )
+        threshold_float = relevance_threshold / 100.0
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "stage": "briefing_start",
+                    "days": days,
+                    "categories": len(categories),
+                }
+            )
+
+        # Collect results per category, deduplicating by episode ID
+        seen_ids = set()
+        category_results = {}
+
+        for i, (query, label) in enumerate(zip(categories, category_labels)):
+            if progress_callback:
+                progress_callback({"stage": "briefing_category", "category": label, "index": i})
+
+            results = self.search_time_filtered(
+                query, days=days, limit=results_per_category, relevance_threshold=threshold_float
+            )
+
+            deduped = []
+            for r in results:
+                if r["id"] not in seen_ids:
+                    seen_ids.add(r["id"])
+                    deduped.append(r)
+
+            if deduped:
+                category_results[label] = deduped
+
+        # Build context for the LLM
+        if not category_results:
+            return (
+                f"No relevant podcast content found in the past "
+                f"{days} days. Try increasing the lookback window "
+                "with --days or lowering the relevance threshold."
+            )
+
+        context_parts = []
+        for label, results in category_results.items():
+            context_parts.append(f"## {label}\n")
+            for r in results:
+                pub = r.get("published_at")
+                date_str = pub.strftime("%Y-%m-%d") if pub else "Unknown"
+                context_parts.append(
+                    f"**{r['podcast']}** — *{r['episode']}* "
+                    f"({date_str}, {r['similarity']}% relevance)\n"
+                    f"> {r['excerpt']}\n"
+                )
+            context_parts.append("")
+
+        context = "\n".join(context_parts)
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "stage": "briefing_synthesize",
+                    "total_results": len(seen_ids),
+                    "categories_with_results": len(category_results),
+                }
+            )
+
+        # Synthesize via OpenRouter
+        if not self.config.openrouter_api_key:
+            return "No OpenRouter API key configured. Raw results:\n\n" + context
+
+        from .cost_tracker import track_api_call
+
+        headers = {
+            "Authorization": f"Bearer {self.config.openrouter_api_key}",
+            "HTTP-Referer": "https://github.com/pedramamini/podsidian",
+        }
+
+        prompt = self.config.briefing_prompt.format(context=context)
+
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": self.config.openrouter_model,
+                "max_tokens": 8192,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+        )
+
+        response.raise_for_status()
+        response_data = response.json()
+
+        if self.config.cost_tracking_enabled:
+            track_api_call(response_data, self.config.openrouter_model)
+
+        if progress_callback:
+            progress_callback({"stage": "briefing_complete"})
+
+        return response_data["choices"][0]["message"]["content"]
+
     def get_podcast_ratings(self, podcast_id: int = None) -> Dict:
         """Get rating statistics for a podcast or all podcasts.
-        
+
         Args:
             podcast_id: Optional specific podcast ID to analyze
-            
+
         Returns:
             Dict with rating statistics
         """
         from sqlalchemy import func, case
-        
-        query = self.db.query(
-            Podcast.id,
-            Podcast.title,
-            func.count(Episode.id).label('total_episodes'),
-            func.count(case((Episode.rating.isnot(None), 1))).label('rated_episodes'),
-            func.avg(Episode.quality_score).label('avg_quality_score'),
-            func.count(case((Episode.rating == 'S', 1))).label('s_tier'),
-            func.count(case((Episode.rating == 'A', 1))).label('a_tier'),
-            func.count(case((Episode.rating == 'B', 1))).label('b_tier'),
-            func.count(case((Episode.rating == 'C', 1))).label('c_tier'),
-            func.count(case((Episode.rating == 'D', 1))).label('d_tier')
-        ).join(Episode).group_by(Podcast.id, Podcast.title)
-        
+
+        query = (
+            self.db.query(
+                Podcast.id,
+                Podcast.title,
+                func.count(Episode.id).label("total_episodes"),
+                func.count(case((Episode.rating.isnot(None), 1))).label("rated_episodes"),
+                func.avg(Episode.quality_score).label("avg_quality_score"),
+                func.count(case((Episode.rating == "S", 1))).label("s_tier"),
+                func.count(case((Episode.rating == "A", 1))).label("a_tier"),
+                func.count(case((Episode.rating == "B", 1))).label("b_tier"),
+                func.count(case((Episode.rating == "C", 1))).label("c_tier"),
+                func.count(case((Episode.rating == "D", 1))).label("d_tier"),
+            )
+            .join(Episode)
+            .group_by(Podcast.id, Podcast.title)
+        )
+
         if podcast_id:
             query = query.filter(Podcast.id == podcast_id)
-            
+
         results = query.all()
-        
+
         podcasts = []
         for result in results:
             # Calculate weighted average rating (S=5, A=4, B=3, C=2, D=1)
-            total_weighted = (result.s_tier * 5 + result.a_tier * 4 + result.b_tier * 3 + 
-                            result.c_tier * 2 + result.d_tier * 1)
-            weighted_avg = total_weighted / result.rated_episodes if result.rated_episodes > 0 else 0
-            
+            total_weighted = (
+                result.s_tier * 5
+                + result.a_tier * 4
+                + result.b_tier * 3
+                + result.c_tier * 2
+                + result.d_tier * 1
+            )
+            weighted_avg = (
+                total_weighted / result.rated_episodes if result.rated_episodes > 0 else 0
+            )
+
             # Determine overall tier based on weighted average
             if weighted_avg >= 4.5:
                 overall_tier = "S"
@@ -1619,22 +1943,26 @@ CHANGES MADE:
                 overall_tier = "C"
             else:
                 overall_tier = "D"
-            
-            podcasts.append({
-                'id': result.id,
-                'title': result.title,
-                'total_episodes': result.total_episodes,
-                'rated_episodes': result.rated_episodes,
-                'avg_quality_score': round(result.avg_quality_score, 1) if result.avg_quality_score else None,
-                'overall_tier': overall_tier,
-                'weighted_avg': round(weighted_avg, 2),
-                'tier_counts': {
-                    'S': result.s_tier,
-                    'A': result.a_tier,
-                    'B': result.b_tier,
-                    'C': result.c_tier,
-                    'D': result.d_tier
+
+            podcasts.append(
+                {
+                    "id": result.id,
+                    "title": result.title,
+                    "total_episodes": result.total_episodes,
+                    "rated_episodes": result.rated_episodes,
+                    "avg_quality_score": round(result.avg_quality_score, 1)
+                    if result.avg_quality_score
+                    else None,
+                    "overall_tier": overall_tier,
+                    "weighted_avg": round(weighted_avg, 2),
+                    "tier_counts": {
+                        "S": result.s_tier,
+                        "A": result.a_tier,
+                        "B": result.b_tier,
+                        "C": result.c_tier,
+                        "D": result.d_tier,
+                    },
                 }
-            })
-        
+            )
+
         return podcasts if not podcast_id else (podcasts[0] if podcasts else None)

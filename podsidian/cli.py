@@ -17,6 +17,7 @@ from .api import create_api
 # Get default paths
 DEFAULT_DB_PATH = os.path.expanduser("~/.local/share/podsidian/podsidian.db")
 
+
 def get_db_session():
     """Initialize database and return session."""
     # Ensure directory exists
@@ -28,36 +29,48 @@ def get_db_session():
     Session = sessionmaker(bind=engine)
     return Session()
 
+
 @click.group()
 def cli():
     """Podsidian - Apple Podcasts to Obsidian Bridge"""
     pass
 
-@cli.command(name='show-config')
+
+@cli.command(name="show-config")
 def show_config():
     """Show current configuration and status."""
     # Check if config file exists
     if not os.path.exists(config.config_path):
-        click.echo(click.style("\nWarning: No configuration file found!", fg='red', bold=True))
-        click.echo(click.style("Run 'podsidian init' to create a default configuration file,", fg='yellow'))
-        click.echo(click.style("then adjust the settings in " + config.config_path + " as needed.\n", fg='yellow'))
+        click.echo(click.style("\nWarning: No configuration file found!", fg="red", bold=True))
+        click.echo(
+            click.style("Run 'podsidian init' to create a default configuration file,", fg="yellow")
+        )
+        click.echo(
+            click.style(
+                "then adjust the settings in " + config.config_path + " as needed.\n", fg="yellow"
+            )
+        )
         return
 
     session = get_db_session()
 
     def print_section(title, items, indent=0):
-        click.echo("\n" + " " * indent + click.style(f"[{title}]", fg='green', bold=True))
+        click.echo("\n" + " " * indent + click.style(f"[{title}]", fg="green", bold=True))
         for key, value in items:
             # Skip the template and prompt as they're too long
-            if key in ['template', 'prompt', 'value_prompt']:
-                value = '<configured>' if value else '<not configured>'
+            if key in ["template", "prompt", "value_prompt"]:
+                value = "<configured>" if value else "<not configured>"
             # Mask API key
-            elif key == 'api_key':
-                value = '***' + value[-4:] if value else '<not set>'
+            elif key == "api_key":
+                value = "***" + value[-4:] if value else "<not set>"
             # Format lists nicely
             elif isinstance(value, list):
-                value = '\n' + '\n'.join([' ' * (indent + 4) + '• ' + str(item) for item in value]) if value else '<none>'
-            click.echo(" " * (indent + 2) + click.style(f"{key}: ", fg='bright_black') + str(value))
+                value = (
+                    "\n" + "\n".join([" " * (indent + 4) + "• " + str(item) for item in value])
+                    if value
+                    else "<none>"
+                )
+            click.echo(" " * (indent + 2) + click.style(f"{key}: ", fg="bright_black") + str(value))
 
     # Get Annoy index info
     annoy_path = config.annoy_index_path
@@ -66,12 +79,17 @@ def show_config():
 
     # Get episode stats
     from .models import Episode, Podcast
+
     total_episodes = session.query(Episode).count()
-    episodes_with_embeddings = session.query(Episode).filter(Episode.vector_embedding.isnot(None)).count()
+    episodes_with_embeddings = (
+        session.query(Episode).filter(Episode.vector_embedding.isnot(None)).count()
+    )
 
     click.echo("\nAnnoy Vector Index:")
     click.echo(f"  Path: {click.style(annoy_path, fg='blue')}")
-    click.echo(f"  Exists: {click.style('Yes', fg='green') if annoy_exists else click.style('No', fg='red')}")
+    click.echo(
+        f"  Exists: {click.style('Yes', fg='green') if annoy_exists else click.style('No', fg='red')}"
+    )
     if annoy_exists:
         click.echo(f"  Size: {click.style(str(round(annoy_size / 1024 / 1024, 2)), fg='blue')} MB")
 
@@ -87,52 +105,49 @@ def show_config():
 
     click.echo("\nEpisode Statistics:")
     click.echo(f"  Total Episodes: {click.style(str(total_episodes), fg='blue')}")
-    click.echo(f"  Episodes with Embeddings: {click.style(str(episodes_with_embeddings), fg='blue')}")
+    click.echo(
+        f"  Episodes with Embeddings: {click.style(str(episodes_with_embeddings), fg='blue')}"
+    )
 
     # Obsidian Settings
-    obsidian_items = [
-        ('vault_path', config.vault_path),
-        ('template', config.note_template)
-    ]
-    print_section('Obsidian', obsidian_items)
+    obsidian_items = [("vault_path", config.vault_path), ("template", config.note_template)]
+    print_section("Obsidian", obsidian_items)
 
     # Whisper Settings
     whisper_items = [
-        ('model', config.whisper_model),
-        ('language', config.whisper_language or '<auto>'),
-        ('cpu_only', config.whisper_cpu_only),
-        ('threads', config.whisper_threads)
+        ("model", config.whisper_model),
+        ("language", config.whisper_language or "<auto>"),
+        ("cpu_only", config.whisper_cpu_only),
+        ("threads", config.whisper_threads),
     ]
-    print_section('Whisper', whisper_items)
+    print_section("Whisper", whisper_items)
 
     # OpenRouter Settings
     openrouter_items = [
-        ('api_key', config.openrouter_api_key),
-        ('model', config.openrouter_model),
-        ('processing_model', config.openrouter_processing_model),
-        ('topic_sample_size', config.topic_sample_size),
-        ('transcript_correction_enabled', config.transcript_correction_enabled),
-        ('transcript_correction_chunk_size', config.transcript_correction_chunk_size),
-        ('cost_tracking_enabled', config.cost_tracking_enabled),
-        ('prompt', config.openrouter_prompt)
+        ("api_key", config.openrouter_api_key),
+        ("model", config.openrouter_model),
+        ("processing_model", config.openrouter_processing_model),
+        ("topic_sample_size", config.topic_sample_size),
+        ("transcript_correction_enabled", config.transcript_correction_enabled),
+        ("transcript_correction_chunk_size", config.transcript_correction_chunk_size),
+        ("cost_tracking_enabled", config.cost_tracking_enabled),
+        ("prompt", config.openrouter_prompt),
     ]
-    print_section('OpenRouter', openrouter_items)
+    print_section("OpenRouter", openrouter_items)
 
     # Value Analysis Settings
-    value_items = [
-        ('enabled', config.value_prompt_enabled),
-        ('prompt', config.value_prompt)
-    ]
-    print_section('Value Analysis', value_items)
+    value_items = [("enabled", config.value_prompt_enabled), ("prompt", config.value_prompt)]
+    print_section("Value Analysis", value_items)
 
     # Database Settings
     db_items = [
-        ('path', DEFAULT_DB_PATH),
+        ("path", DEFAULT_DB_PATH),
     ]
-    print_section('Database', db_items)
+    print_section("Database", db_items)
 
-    click.echo("\n" + click.style("Config File: ", fg='bright_black') + config.config_path)
+    click.echo("\n" + click.style("Config File: ", fg="bright_black") + config.config_path)
     click.echo()
+
 
 @cli.command()
 def init():
@@ -144,23 +159,31 @@ def init():
         click.confirm("Configuration file already exists. Overwrite?", abort=True)
 
     # Copy example config
-    example_config = os.path.join(os.path.dirname(__file__), '..', 'config.toml.example')
+    example_config = os.path.join(os.path.dirname(__file__), "..", "config.toml.example")
     shutil.copy2(example_config, config.config_path)
     click.echo(f"Created configuration file at: {config.config_path}")
     click.echo("Please edit this file to configure your OpenRouter API key and preferences.")
+
 
 @cli.group()
 def subscriptions():
     """Manage Apple Podcasts subscriptions."""
     pass
 
-@subscriptions.command(name='list')
-@click.option('--sort', type=click.Choice(['alpha', 'episodes']), default='alpha', help='Sort by name (alpha) or episode count (episodes)')
+
+@subscriptions.command(name="list")
+@click.option(
+    "--sort",
+    type=click.Choice(["alpha", "episodes"]),
+    default="alpha",
+    help="Sort by name (alpha) or episode count (episodes)",
+)
 def list_subscriptions(sort):
     """List all Apple Podcasts subscriptions."""
     from .apple_podcasts import get_subscriptions
     from .models import Podcast, Episode
     from sqlalchemy import func
+
     session = get_db_session()
 
     # Get subscriptions from Apple Podcasts
@@ -170,23 +193,22 @@ def list_subscriptions(sort):
         return
 
     # Get episode counts for each podcast
-    episode_counts = dict(session.query(
-        Podcast.feed_url,
-        func.count(Episode.id).label('count')
-    ).join(Episode, isouter=True).group_by(Podcast.feed_url).all())
+    episode_counts = dict(
+        session.query(Podcast.feed_url, func.count(Episode.id).label("count"))
+        .join(Episode, isouter=True)
+        .group_by(Podcast.feed_url)
+        .all()
+    )
 
     # Ensure all podcasts exist in database
     for sub in subs:
-        podcast = session.query(Podcast).filter_by(feed_url=sub['feed_url']).first()
+        podcast = session.query(Podcast).filter_by(feed_url=sub["feed_url"]).first()
         if not podcast:
             podcast = Podcast(
-                title=sub['title'],
-                author=sub['author'],
-                feed_url=sub['feed_url'],
-                muted=False
+                title=sub["title"], author=sub["author"], feed_url=sub["feed_url"], muted=False
             )
             session.add(podcast)
-            episode_counts[sub['feed_url']] = 0
+            episode_counts[sub["feed_url"]] = 0
     session.commit()
 
     # Get mute states from database
@@ -196,25 +218,25 @@ def list_subscriptions(sort):
     muted_subs = []
     unmuted_subs = []
     for sub in subs:
-        if muted_feeds.get(sub['feed_url'], False):
+        if muted_feeds.get(sub["feed_url"], False):
             muted_subs.append(sub)
         else:
             unmuted_subs.append(sub)
 
     # Sort the lists based on the sort option
-    if sort == 'episodes':
-        muted_subs.sort(key=lambda x: (-episode_counts.get(x['feed_url'], 0), x['title'].lower()))
-        unmuted_subs.sort(key=lambda x: (-episode_counts.get(x['feed_url'], 0), x['title'].lower()))
+    if sort == "episodes":
+        muted_subs.sort(key=lambda x: (-episode_counts.get(x["feed_url"], 0), x["title"].lower()))
+        unmuted_subs.sort(key=lambda x: (-episode_counts.get(x["feed_url"], 0), x["title"].lower()))
     else:  # alpha
-        muted_subs.sort(key=lambda x: x['title'].lower())
-        unmuted_subs.sort(key=lambda x: x['title'].lower())
+        muted_subs.sort(key=lambda x: x["title"].lower())
+        unmuted_subs.sort(key=lambda x: x["title"].lower())
 
     # Show active subscriptions
     click.echo("\nActive Subscriptions:")
     click.echo("-" * 30)
     if unmuted_subs:
         for sub in unmuted_subs:
-            episode_count = episode_counts.get(sub['feed_url'], 0)
+            episode_count = episode_counts.get(sub["feed_url"], 0)
             episodes_text = f" ({episode_count} episode{'s' if episode_count != 1 else ''})"
             click.echo(f"• {sub['title']}{episodes_text}")
     else:
@@ -225,15 +247,16 @@ def list_subscriptions(sort):
     click.echo("-" * 30)
     if muted_subs:
         for sub in muted_subs:
-            episode_count = episode_counts.get(sub['feed_url'], 0)
+            episode_count = episode_counts.get(sub["feed_url"], 0)
             episodes_text = f" ({episode_count} episode{'s' if episode_count != 1 else ''})"
             click.echo(f"• {sub['title']}{episodes_text}")
     else:
         click.echo("No muted subscriptions")
     click.echo()
 
+
 @subscriptions.command()
-@click.argument('title')
+@click.argument("title")
 def mute(title):
     """Mute a podcast subscription by title.
 
@@ -250,8 +273,9 @@ def mute(title):
     session.commit()
     click.echo(f"Muted podcast: {podcast.title}")
 
+
 @subscriptions.command()
-@click.argument('title')
+@click.argument("title")
 def unmute(title):
     """Unmute a podcast subscription by title.
 
@@ -268,81 +292,96 @@ def unmute(title):
     session.commit()
     click.echo(f"Unmuted podcast: {podcast.title}")
 
+
 @subscriptions.command()
-@click.option('--sort', type=click.Choice(['tier', 'quality', 'episodes']), default='tier',
-              help='Sort order: tier (by overall tier), quality (by avg quality score), episodes (by episode count)')
+@click.option(
+    "--sort",
+    type=click.Choice(["tier", "quality", "episodes"]),
+    default="tier",
+    help="Sort order: tier (by overall tier), quality (by avg quality score), episodes (by episode count)",
+)
 def ratings(sort):
     """Show subscription ratings based on episode content analysis."""
     session = get_db_session()
     from .core import PodcastProcessor
-    
+
     processor = PodcastProcessor(session)
     podcasts = processor.get_podcast_ratings()
-    
+
     if not podcasts:
         click.echo("No podcasts with ratings found.")
         click.echo("Run 'podsidian ingest' with value analysis enabled to generate ratings.")
         return
-    
+
     # Sort the results
-    if sort == 'tier':
+    if sort == "tier":
         # Sort by tier (S highest, D lowest) and then by quality score
-        tier_order = {'S': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1, None: 0}
-        podcasts.sort(key=lambda x: (tier_order.get(x['overall_tier'], 0), x['avg_quality_score'] or 0), reverse=True)
-    elif sort == 'quality':
-        podcasts.sort(key=lambda x: x['avg_quality_score'] or 0, reverse=True)
-    elif sort == 'episodes':
-        podcasts.sort(key=lambda x: x['rated_episodes'], reverse=True)
-    
+        tier_order = {"S": 5, "A": 4, "B": 3, "C": 2, "D": 1, None: 0}
+        podcasts.sort(
+            key=lambda x: (tier_order.get(x["overall_tier"], 0), x["avg_quality_score"] or 0),
+            reverse=True,
+        )
+    elif sort == "quality":
+        podcasts.sort(key=lambda x: x["avg_quality_score"] or 0, reverse=True)
+    elif sort == "episodes":
+        podcasts.sort(key=lambda x: x["rated_episodes"], reverse=True)
+
     # Display header
-    click.echo(click.style("\nSubscription Ratings Summary", fg='green', bold=True))
+    click.echo(click.style("\nSubscription Ratings Summary", fg="green", bold=True))
     click.echo("=" * 50)
-    
+
     for podcast in podcasts:
         # Title and overall tier
         tier_color = {
-            'S': 'bright_green',
-            'A': 'green', 
-            'B': 'yellow',
-            'C': 'red',
-            'D': 'bright_red'
-        }.get(podcast['overall_tier'], 'white')
-        
+            "S": "bright_green",
+            "A": "green",
+            "B": "yellow",
+            "C": "red",
+            "D": "bright_red",
+        }.get(podcast["overall_tier"], "white")
+
         click.echo(f"\n📻 {click.style(podcast['title'], fg='bright_white', bold=True)}")
-        click.echo(f"   Overall: {click.style(podcast['overall_tier'] + ' Tier', fg=tier_color, bold=True)} "
-                  f"(Weighted Avg: {podcast['weighted_avg']})")
-        
+        click.echo(
+            f"   Overall: {click.style(podcast['overall_tier'] + ' Tier', fg=tier_color, bold=True)} "
+            f"(Weighted Avg: {podcast['weighted_avg']})"
+        )
+
         # Stats
         click.echo(f"   Episodes: {podcast['rated_episodes']}/{podcast['total_episodes']} rated")
-        if podcast['avg_quality_score']:
+        if podcast["avg_quality_score"]:
             click.echo(f"   Avg Quality Score: {podcast['avg_quality_score']}/100")
-        
+
         # Tier breakdown
-        tier_counts = podcast['tier_counts']
+        tier_counts = podcast["tier_counts"]
         if any(tier_counts.values()):
             tier_parts = []
             for tier, count in tier_counts.items():
                 if count > 0:
                     tier_parts.append(f"{tier}:{count}")
             click.echo(f"   Tier Breakdown: {' | '.join(tier_parts)}")
-    
+
     click.echo(f"\n{len(podcasts)} subscriptions analyzed")
 
+
 @cli.command()
-@click.option('--ratings', is_flag=True, help='Show content ratings for episodes')
-@click.option('--filter-tier', type=click.Choice(['S', 'A', 'B', 'C', 'D']), help='Filter episodes by rating tier')
+@click.option("--ratings", is_flag=True, help="Show content ratings for episodes")
+@click.option(
+    "--filter-tier",
+    type=click.Choice(["S", "A", "B", "C", "D"]),
+    help="Filter episodes by rating tier",
+)
 def episodes(ratings, filter_tier):
     """List all downloaded episodes."""
     session = get_db_session()
     from .models import Episode, Podcast
 
     query = session.query(Episode).join(Podcast)
-    
+
     # Apply tier filter if specified
     if filter_tier:
         query = query.filter(Episode.rating == filter_tier)
         ratings = True  # Force ratings display when filtering by tier
-    
+
     episodes = query.order_by(Podcast.title, Episode.published_at.desc()).all()
 
     if not episodes:
@@ -359,30 +398,30 @@ def episodes(ratings, filter_tier):
 
         date_str = episode.published_at.strftime("%Y-%m-%d") if episode.published_at else "No date"
         status = "✓" if episode.transcript else " "
-        
+
         # Format basic episode info
         episode_line = f"[{status}] {click.style(f'#{episode.id:04d}', fg='bright_blue')} {date_str} - {episode.title}"
-        
+
         # Add rating info if requested or available
         if ratings and episode.rating:
             tier_color = {
-                'S': 'bright_green',
-                'A': 'green', 
-                'B': 'yellow',
-                'C': 'red',
-                'D': 'bright_red'
-            }.get(episode.rating, 'white')
-            
+                "S": "bright_green",
+                "A": "green",
+                "B": "yellow",
+                "C": "red",
+                "D": "bright_red",
+            }.get(episode.rating, "white")
+
             rating_info = click.style(f"[{episode.rating}]", fg=tier_color, bold=True)
             if episode.quality_score:
                 rating_info += f" ({episode.quality_score}/100)"
             episode_line += f" {rating_info}"
-            
+
             # Show labels if available
             if episode.labels:
                 labels = episode.labels[:50] + "..." if len(episode.labels) > 50 else episode.labels
                 episode_line += f"\n     Labels: {click.style(labels, fg='cyan')}"
-        
+
         click.echo(episode_line)
 
     click.echo("\nUse 'podsidian export <episode_id>' to export a transcript")
@@ -390,9 +429,12 @@ def episodes(ratings, filter_tier):
         click.echo("Use --ratings to show content ratings or --filter-tier to filter by rating")
     click.echo()
 
+
 @cli.command()
-@click.option('--lookback', type=int, default=7, help='Number of days to look back for episodes (default: 7)')
-@click.option('--debug', is_flag=True, help='Enable debug output')
+@click.option(
+    "--lookback", type=int, default=7, help="Number of days to look back for episodes (default: 7)"
+)
+@click.option("--debug", is_flag=True, help="Enable debug output")
 def ingest(lookback, debug):
     """Process new episodes from Apple Podcasts subscriptions.
 
@@ -409,7 +451,9 @@ def ingest(lookback, debug):
         return
 
     if lookback > 7:
-        click.confirm(f"Warning: Looking back {lookback} days may take a while. Continue?", abort=True)
+        click.confirm(
+            f"Warning: Looking back {lookback} days may take a while. Continue?", abort=True
+        )
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     click.echo(f"[{timestamp}] Ingesting episodes from the last {lookback} days...")
@@ -421,96 +465,109 @@ def ingest(lookback, debug):
     def show_progress(info):
         nonlocal current_podcast, total_podcasts
 
-        stage = info['stage']
+        stage = info["stage"]
 
-        if stage == 'init':
-            total_podcasts = info['total_podcasts']
+        if stage == "init":
+            total_podcasts = info["total_podcasts"]
             click.echo(f"Found {total_podcasts} podcast subscriptions")
 
-        elif stage == 'podcast':
-            podcast = info['podcast']
-            current = info['current']
-            total = info['total']
+        elif stage == "podcast":
+            podcast = info["podcast"]
+            current = info["current"]
+            total = info["total"]
 
-            current_podcast = podcast['title']
-            click.echo(f"\n[{current}/{total}] Processing podcast: {click.style(current_podcast, fg='blue', bold=True)}")
+            current_podcast = podcast["title"]
+            click.echo(
+                f"\n[{current}/{total}] Processing podcast: {click.style(current_podcast, fg='blue', bold=True)}"
+            )
 
-        elif stage == 'episodes_found':
-            podcast = info['podcast']
-            total = info['total']
+        elif stage == "episodes_found":
+            podcast = info["podcast"]
+            total = info["total"]
             click.echo(f"Found {total} recent episodes")
 
-        elif stage == 'episode_start':
+        elif stage == "episode_start":
             # Get initial cost state
             from .cost_tracker import get_costs
-            initial_costs = get_costs().copy()
-            info['initial_costs'] = initial_costs
 
-            episode = info['episode']
-            current = info['current']
-            total = info['total']
-            published = episode['published_at'].strftime('%Y-%m-%d') if episode.get('published_at') else 'Unknown date'
+            initial_costs = get_costs().copy()
+            info["initial_costs"] = initial_costs
+
+            episode = info["episode"]
+            current = info["current"]
+            total = info["total"]
+            published = (
+                episode["published_at"].strftime("%Y-%m-%d")
+                if episode.get("published_at")
+                else "Unknown date"
+            )
 
             click.echo(f"\n  Episode [{current}/{total}] {published}")
             click.echo(f"  {click.style('Title:', fg='bright_black')} {episode['title']}")
 
-        elif stage == 'downloading':
+        elif stage == "downloading":
             click.echo(f"  {click.style('→', fg='yellow')} Downloading audio...")
 
-        elif stage == 'transcribing':
+        elif stage == "transcribing":
             click.echo(f"  {click.style('→', fg='yellow')} Transcribing audio...")
 
-        elif stage == 'transcribing_progress':
-            progress = info['progress']
+        elif stage == "transcribing_progress":
+            progress = info["progress"]
             width = 30
             filled = int(width * progress)
-            bar = '=' * filled + '-' * (width - filled)
+            bar = "=" * filled + "-" * (width - filled)
             percentage = int(progress * 100)
             # Use carriage return to update in place
-            click.echo(f"\r  {click.style('→', fg='yellow')} Transcribing: [{bar}] {percentage}%", nl=False)
+            click.echo(
+                f"\r  {click.style('→', fg='yellow')} Transcribing: [{bar}] {percentage}%", nl=False
+            )
 
-        elif stage == 'embedding':
+        elif stage == "embedding":
             click.echo(f"  {click.style('→', fg='yellow')} Generating embeddings...")
 
-        elif stage == 'exporting':
+        elif stage == "exporting":
             click.echo(f"  {click.style('→', fg='yellow')} Exporting to Obsidian...")
 
-        elif stage == 'episode_complete':
+        elif stage == "episode_complete":
             # Calculate cost delta for this episode
-            if config.cost_tracking_enabled and 'initial_costs' in info:
+            if config.cost_tracking_enabled and "initial_costs" in info:
                 from .cost_tracker import get_costs
                 from decimal import Decimal
 
                 current_costs = get_costs()
-                initial_costs = info['initial_costs']
+                initial_costs = info["initial_costs"]
 
                 # Calculate deltas
-                audio_delta = current_costs['audio_seconds'] - initial_costs['audio_seconds']
-                token_delta = current_costs['total_tokens'] - initial_costs['total_tokens']
-                cost_delta = current_costs['total_cost'] - initial_costs['total_cost']
+                audio_delta = current_costs["audio_seconds"] - initial_costs["audio_seconds"]
+                token_delta = current_costs["total_tokens"] - initial_costs["total_tokens"]
+                cost_delta = current_costs["total_cost"] - initial_costs["total_cost"]
 
                 # Show cost summary for this episode
                 click.echo(f"  {click.style('✓', fg='green')} Processing complete")
-                click.echo(f"    {click.style('Audio:', fg='bright_black')} {audio_delta:.1f} seconds")
+                click.echo(
+                    f"    {click.style('Audio:', fg='bright_black')} {audio_delta:.1f} seconds"
+                )
                 if token_delta > 0:
                     click.echo(f"    {click.style('Tokens:', fg='bright_black')} {token_delta:,}")
-                if cost_delta > Decimal('0'):
+                if cost_delta > Decimal("0"):
                     click.echo(f"    {click.style('Cost:', fg='bright_black')} ${cost_delta:.6f}")
             else:
                 click.echo(f"  {click.style('✓', fg='green')} Processing complete")
 
-        elif stage == 'debug':
+        elif stage == "debug":
             click.echo(f"  {click.style('🔍', fg='bright_black')} {info['message']}")
 
-        elif stage == 'info':
+        elif stage == "info":
             click.echo(f"  {click.style('ℹ', fg='blue')} {info['message']}")
 
-        elif stage == 'error':
+        elif stage == "error":
             # Make sure we're on a new line
             click.echo()
             click.echo(f"  {click.style('✗', fg='red')} {info['error']}")
 
-    processor.ingest_subscriptions(lookback_days=lookback, progress_callback=show_progress, debug=debug)
+    processor.ingest_subscriptions(
+        lookback_days=lookback, progress_callback=show_progress, debug=debug
+    )
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     click.echo(f"\n\n[{timestamp}] Ingestion complete!")
 
@@ -518,9 +575,10 @@ def ingest(lookback, debug):
     if config.cost_tracking_enabled:
         click.echo("\n" + format_cost_summary())
 
+
 @cli.command()
-@click.argument('episode_ids', nargs=-1, type=int, required=True)
-@click.option('--debug', is_flag=True, help='Enable debug output')
+@click.argument("episode_ids", nargs=-1, type=int, required=True)
+@click.option("--debug", is_flag=True, help="Enable debug output")
 def reingest(episode_ids, debug):
     """Re-ingest specific episodes by ID, re-processing transcripts and embeddings.
 
@@ -549,66 +607,70 @@ def reingest(episode_ids, debug):
     click.echo(f"[{timestamp}] Re-ingesting {len(episode_ids)} episode(s)...")
 
     def show_progress(info):
-        stage = info['stage']
+        stage = info["stage"]
 
-        if stage == 'episode_start':
-            episode = info['episode']
-            published = episode.get('published_at')
-            published_str = published.strftime('%Y-%m-%d') if published else 'Unknown date'
+        if stage == "episode_start":
+            episode = info["episode"]
+            published = episode.get("published_at")
+            published_str = published.strftime("%Y-%m-%d") if published else "Unknown date"
 
-            click.echo(f"\n{click.style('Episode #' + str(episode['id']), fg='blue', bold=True)} - {published_str}")
+            click.echo(
+                f"\n{click.style('Episode #' + str(episode['id']), fg='blue', bold=True)} - {published_str}"
+            )
             click.echo(f"  {click.style('Title:', fg='bright_black')} {episode['title']}")
 
-        elif stage == 'downloading':
+        elif stage == "downloading":
             click.echo(f"  {click.style('→', fg='yellow')} Downloading audio...")
 
-        elif stage == 'external_transcript':
+        elif stage == "external_transcript":
             click.echo(f"  {click.style('→', fg='yellow')} Using external transcript...")
 
-        elif stage == 'transcribing':
+        elif stage == "transcribing":
             click.echo(f"  {click.style('→', fg='yellow')} Transcribing audio...")
 
-        elif stage == 'transcribing_progress':
-            progress = info['progress']
+        elif stage == "transcribing_progress":
+            progress = info["progress"]
             width = 30
             filled = int(width * progress)
-            bar = '=' * filled + '-' * (width - filled)
+            bar = "=" * filled + "-" * (width - filled)
             percentage = int(progress * 100)
-            click.echo(f"\r  {click.style('→', fg='yellow')} Transcribing: [{bar}] {percentage}%", nl=False)
+            click.echo(
+                f"\r  {click.style('→', fg='yellow')} Transcribing: [{bar}] {percentage}%", nl=False
+            )
 
-        elif stage == 'transcription':
-            message = info.get('message', '')
+        elif stage == "transcription":
+            message = info.get("message", "")
             if message:
                 click.echo(f"  {click.style('ℹ', fg='blue')} {message}")
 
-        elif stage == 'embedding':
+        elif stage == "embedding":
             click.echo(f"  {click.style('→', fg='yellow')} Generating embeddings...")
 
-        elif stage == 'exporting':
+        elif stage == "exporting":
             click.echo(f"  {click.style('→', fg='yellow')} Exporting to Obsidian...")
 
-        elif stage == 'episode_complete':
+        elif stage == "episode_complete":
             click.echo(f"  {click.style('✓', fg='green')} Episode complete")
 
-        elif stage == 'error':
-            error = info.get('error', 'Unknown error')
+        elif stage == "error":
+            error = info.get("error", "Unknown error")
             click.echo(f"  {click.style('✗', fg='red')} Error: {error}")
 
-        elif stage == 'warning':
-            message = info.get('message', '')
+        elif stage == "warning":
+            message = info.get("message", "")
             click.echo(f"  {click.style('⚠', fg='yellow')} {message}")
 
-        elif stage == 'info':
-            message = info.get('message', '')
+        elif stage == "info":
+            message = info.get("message", "")
             click.echo(f"  {click.style('ℹ', fg='blue')} {message}")
 
-        elif stage == 'timing':
-            message = info.get('message', '')
+        elif stage == "timing":
+            message = info.get("message", "")
             if debug:
                 click.echo(f"  {click.style('⏱', fg='bright_black')} {message}")
 
-        elif stage == 'debug':
-            message = info.get('message', '')
+        elif stage == "debug":
+            message = info.get("message", "")
             if debug:
                 click.echo(f"  {click.style('DEBUG:', fg='magenta')} {message}")
 
@@ -622,7 +684,9 @@ def reingest(episode_ids, debug):
             success_count += 1
         except Exception as e:
             failed_count += 1
-            click.echo(f"\n{click.style('Error processing episode #' + str(episode_id) + ':', fg='red')} {str(e)}")
+            click.echo(
+                f"\n{click.style('Error processing episode #' + str(episode_id) + ':', fg='red')} {str(e)}"
+            )
 
     # Summary
     click.echo(f"\n{click.style('Summary:', bold=True)}")
@@ -634,10 +698,13 @@ def reingest(episode_ids, debug):
     if cost_tracking_enabled:
         click.echo("\n" + format_cost_summary())
 
+
 @cli.command()
-@click.argument('query')
-@click.option('--relevance', type=int, default=30, help='Minimum relevance score (0-100) for results')
-@click.option('--refresh', is_flag=True, help='Force refresh of the search index before searching')
+@click.argument("query")
+@click.option(
+    "--relevance", type=int, default=30, help="Minimum relevance score (0-100) for results"
+)
+@click.option("--refresh", is_flag=True, help="Force refresh of the search index before searching")
 def search(query, relevance, refresh):
     """Search through podcast content using natural language.
 
@@ -663,7 +730,9 @@ def search(query, relevance, refresh):
     # Get statistics about searchable content
     total_podcasts = session.query(Podcast).filter_by(muted=False).count()
     total_episodes = session.query(Episode).filter(Episode.vector_embedding.isnot(None)).count()
-    click.echo(f"Searching through {click.style(str(total_podcasts), bold=True)} podcasts and {click.style(str(total_episodes), bold=True)} episodes")
+    click.echo(
+        f"Searching through {click.style(str(total_podcasts), bold=True)} podcasts and {click.style(str(total_episodes), bold=True)} episodes"
+    )
     click.echo(f"Minimum relevance threshold: {click.style(f'{relevance}%', fg='yellow')}")
     click.echo("─" * 50)
 
@@ -685,9 +754,9 @@ def search(query, relevance, refresh):
     # Group results by podcast
     podcasts = {}
     for result in results:
-        if result['podcast'] not in podcasts:
-            podcasts[result['podcast']] = []
-        podcasts[result['podcast']].append(result)
+        if result["podcast"] not in podcasts:
+            podcasts[result["podcast"]] = []
+        podcasts[result["podcast"]].append(result)
 
     # Display results grouped by podcast
     for podcast, episodes in podcasts.items():
@@ -696,27 +765,112 @@ def search(query, relevance, refresh):
 
         for result in episodes:
             # Show episode title and metadata
-            date_str = result['published_at'].strftime("%Y-%m-%d") if result['published_at'] else "No date"
+            date_str = (
+                result["published_at"].strftime("%Y-%m-%d") if result["published_at"] else "No date"
+            )
             click.echo(f"\n{click.style(result['episode'], bold=True)} ({date_str})")
             click.echo(f"Relevance: {click.style(f'{result['similarity']}%', fg='green')}")
 
             # Show relevant excerpt
-            if result.get('excerpt'):
+            if result.get("excerpt"):
                 click.echo("\nRelevant excerpt:")
                 click.echo(f"{click.style('│ ', fg='bright_black')}{result['excerpt']}")
 
     click.echo("\nTip: Use --relevance to adjust the minimum relevance score (0-100)")
 
     # Display cost summary if enabled
-    if 'cost_tracking_enabled' in locals() and cost_tracking_enabled:
+    if "cost_tracking_enabled" in locals() and cost_tracking_enabled:
         click.echo("\n" + format_cost_summary())
+
+
+@cli.command()
+@click.option("--days", type=int, default=None, help="Days to look back (default: from config)")
+@click.option(
+    "--categories",
+    type=str,
+    default=None,
+    help='Comma-separated custom search categories (e.g. "cybersecurity,AI,startups")',
+)
+@click.option("--debug", is_flag=True, help="Enable debug output")
+def briefing(days, categories, debug):
+    """Generate a personalized news briefing from your podcast library.
+
+    Scans recent episodes across interest categories using semantic search,
+    then synthesizes a briefing via LLM.
+
+    Examples:
+        podsidian briefing
+        podsidian briefing --days 30
+        podsidian briefing --categories "cybersecurity,AI,health"
+    """
+    from .core import PodcastProcessor
+    from .models import Podcast, Episode
+    from .cost_tracker import init_cost_tracker, format_cost_summary
+
+    cost_tracking_enabled = config.cost_tracking_enabled
+    if cost_tracking_enabled:
+        init_cost_tracker()
+
+    session = get_db_session()
+    processor = PodcastProcessor(session)
+
+    # Resolve parameters
+    lookback = days or config.briefing_default_days
+
+    # Parse custom categories or use config defaults
+    cat_queries = None
+    cat_labels = None
+    if categories:
+        cat_labels = [c.strip() for c in categories.split(",")]
+        cat_queries = cat_labels  # Use label text as the search query
+
+    # Stats
+    total_podcasts = session.query(Podcast).filter_by(muted=False).count()
+    total_episodes = session.query(Episode).filter(Episode.vector_embedding.isnot(None)).count()
+    num_categories = len(cat_labels) if cat_labels else len(config.briefing_categories)
+
+    click.echo(
+        f"Generating briefing from {click.style(str(total_podcasts), bold=True)} podcasts "
+        f"({click.style(str(total_episodes), bold=True)} episodes) "
+        f"across {click.style(str(num_categories), bold=True)} categories "
+        f"for the past {click.style(str(lookback), fg='yellow')} days"
+    )
+    click.echo("─" * 50)
+
+    def show_progress(info):
+        stage = info.get("stage", "")
+        if stage == "briefing_category":
+            click.echo(f"  Searching: {click.style(info['category'], fg='cyan')}")
+        elif stage == "briefing_synthesize":
+            click.echo(
+                f"\nFound {click.style(str(info['total_results']), bold=True)} results "
+                f"across {info['categories_with_results']} categories. Synthesizing briefing..."
+            )
+        elif stage == "briefing_complete":
+            click.echo("─" * 50)
+        elif debug and stage == "briefing_start":
+            click.echo(f"  [debug] lookback={info['days']}d, categories={info['categories']}")
+
+    result = processor.generate_briefing(
+        days=lookback,
+        categories=cat_queries,
+        category_labels=cat_labels,
+        progress_callback=show_progress,
+    )
+
+    click.echo(f"\n{result}")
+
+    if cost_tracking_enabled:
+        click.echo("\n" + format_cost_summary())
+
 
 @cli.group()
 def markdown():
     """Manage markdown exports."""
     pass
 
-@markdown.command(name='list')
+
+@markdown.command(name="list")
 def list_markdown():
     """List all markdown files in the vault."""
     from .markdown import list_markdown_files
@@ -736,18 +890,15 @@ def list_markdown():
 
     click.echo(f"\nFound {len(files)} markdown files in vault:")
     for file in files:
-        hash_str = file['file_hash']
-        published_at = file['published_at']
-        date_str = published_at.strftime('%Y-%m-%d') if published_at else 'No Date'
+        hash_str = file["file_hash"]
+        published_at = file["published_at"]
+        date_str = published_at.strftime("%Y-%m-%d") if published_at else "No Date"
         # Check if filename starts with YYYY-MM-DD
-        has_date_prefix = file['filename'].startswith(date_str)
+        has_date_prefix = file["filename"].startswith(date_str)
 
         # Only show date column if it's not already in filename
         if has_date_prefix:
-            click.echo(
-                f"  {click.style(hash_str, fg='green')} "
-                f"{file['filename']}"
-            )
+            click.echo(f"  {click.style(hash_str, fg='green')} {file['filename']}")
         else:
             click.echo(
                 f"  {click.style(hash_str, fg='green')} "
@@ -755,8 +906,9 @@ def list_markdown():
                 f"{file['filename']}"
             )
 
-@markdown.command(name='regenerate')
-@click.argument('file_hash')
+
+@markdown.command(name="regenerate")
+@click.argument("file_hash")
 def regenerate_markdown(file_hash):
     """Regenerate a markdown file.
 
@@ -785,21 +937,21 @@ def regenerate_markdown(file_hash):
         return
 
     # Filter files based on hash
-    if file_hash == '*':
+    if file_hash == "*":
         files_to_process = files
     else:
-        files_to_process = [f for f in files if f['file_hash'] == file_hash]
+        files_to_process = [f for f in files if f["file_hash"] == file_hash]
         if not files_to_process:
             click.echo(f"No markdown file found with hash: {file_hash}")
             return
 
     success = 0
-    if file_hash == '*':
+    if file_hash == "*":
         click.echo(f"\nRegenerating {len(files_to_process)} markdown files...")
         with tqdm(total=len(files_to_process)) as pbar:
             for file in files_to_process:
                 # Get episode
-                filepath = processor.config.vault_path / file['filename']
+                filepath = processor.config.vault_path / file["filename"]
                 episode = get_episode_from_markdown(filepath, processor)
                 if not episode:
                     click.echo(f"\nWarning: Could not find episode for {file['filename']}")
@@ -820,7 +972,7 @@ def regenerate_markdown(file_hash):
             click.echo("\n" + format_cost_summary())
     else:
         file = files_to_process[0]  # We know there's exactly one file
-        filepath = processor.config.vault_path / file['filename']
+        filepath = processor.config.vault_path / file["filename"]
         episode = get_episode_from_markdown(filepath, processor)
         if not episode:
             click.echo(f"Warning: Could not find episode for {file['filename']}")
@@ -838,14 +990,17 @@ def regenerate_markdown(file_hash):
         except Exception as e:
             click.echo(f"Error regenerating {file['filename']}: {str(e)}")
 
+
 @cli.command()
-@click.argument('episode_id', type=int)
-@click.option('--full', is_flag=True, help='Show the complete transcript (default shows truncated version)')
+@click.argument("episode_id", type=int)
+@click.option(
+    "--full", is_flag=True, help="Show the complete transcript (default shows truncated version)"
+)
 def export(episode_id, full):
     """Export episode transcript to stdout.
 
     EPISODE_ID is the numeric ID shown in the episodes list (e.g. 42)
-    
+
     By default, shows a truncated version of the transcript. Use --full to see the complete transcript.
     """
     session = get_db_session()
@@ -862,10 +1017,14 @@ def export(episode_id, full):
         return
 
     # Print episode info header
-    click.echo(click.style(f"\n{episode.podcast.title}", fg='blue', bold=True))
-    click.echo(click.style(f"{episode.title}", fg='bright_black'))
+    click.echo(click.style(f"\n{episode.podcast.title}", fg="blue", bold=True))
+    click.echo(click.style(f"{episode.title}", fg="bright_black"))
     if episode.published_at:
-        click.echo(click.style(f"Published: {episode.published_at.strftime('%Y-%m-%d')}", fg='bright_black'))
+        click.echo(
+            click.style(
+                f"Published: {episode.published_at.strftime('%Y-%m-%d')}", fg="bright_black"
+            )
+        )
     click.echo("\n" + "=" * 40 + "\n")
 
     # Print transcript (full or truncated)
@@ -875,20 +1034,23 @@ def export(episode_id, full):
         # Show first 2000 characters and indicate truncation
         truncated_transcript = episode.transcript[:2000]
         # Try to end at a complete sentence or word boundary
-        last_period = truncated_transcript.rfind('.')
-        last_space = truncated_transcript.rfind(' ')
-        
+        last_period = truncated_transcript.rfind(".")
+        last_space = truncated_transcript.rfind(" ")
+
         if last_period > 1800:  # If there's a sentence ending near the end
-            truncated_transcript = truncated_transcript[:last_period + 1]
+            truncated_transcript = truncated_transcript[: last_period + 1]
         elif last_space > 1900:  # Otherwise try to end at a word boundary
             truncated_transcript = truncated_transcript[:last_space]
-            
+
         click.echo(truncated_transcript)
         click.echo("\n[Transcript continues unchanged]")
 
+
 @cli.command()
-@click.option('--port', default=8080, help='Port to run the MCP service on')
-@click.option('--stdio', is_flag=True, help='Run in STDIO mode for direct integration with AI agents')
+@click.option("--port", default=8080, help="Port to run the MCP service on")
+@click.option(
+    "--stdio", is_flag=True, help="Run in STDIO mode for direct integration with AI agents"
+)
 def mcp(port, stdio):
     """Start the MCP service for AI agent integration.
 
@@ -910,13 +1072,13 @@ def mcp(port, stdio):
         uvicorn.run(app, host="0.0.0.0", port=port)
 
 
-
 @cli.group()
 def backup():
     """Manage database backups."""
     pass
 
-@backup.command(name='create')
+
+@backup.command(name="create")
 def backup_create():
     """Create a new backup of the database."""
     try:
@@ -925,7 +1087,8 @@ def backup_create():
     except Exception as e:
         click.echo(f"Error creating backup: {str(e)}", err=True)
 
-@backup.command(name='list')
+
+@backup.command(name="list")
 def backup_list():
     """List all available backups."""
     backups = list_backups()
@@ -938,20 +1101,23 @@ def backup_list():
     click.echo("-" * 80)
 
     for backup in backups:
-        created = datetime.fromisoformat(backup['created']).strftime("%Y-%m-%d %H:%M:%S")
-        size_mb = backup['size'] / (1024 * 1024)
+        created = datetime.fromisoformat(backup["created"]).strftime("%Y-%m-%d %H:%M:%S")
+        size_mb = backup["size"] / (1024 * 1024)
         click.echo(f"• {created} ({size_mb:.1f} MB)")
         click.echo(f"  Path: {backup['path']}")
 
         # Show subscription and episode counts if available
-        if backup['subscriptions'] is not None and backup['episodes'] is not None:
-            click.echo(f"  Contents: {backup['subscriptions']} subscriptions, {backup['episodes']} episodes")
+        if backup["subscriptions"] is not None and backup["episodes"] is not None:
+            click.echo(
+                f"  Contents: {backup['subscriptions']} subscriptions, {backup['episodes']} episodes"
+            )
 
         # Add a blank line between entries
         click.echo("")
 
-@backup.command(name='restore')
-@click.argument('date')
+
+@backup.command(name="restore")
+@click.argument("date")
 def backup_restore(date):
     """Restore database from a backup.
 
@@ -971,17 +1137,21 @@ def backup_restore(date):
         # Show differences
         click.echo("Restore details:")
         click.echo(f"Selected backup: {backup_path}")
-        click.echo(f"Current database size: {current_size / (1024*1024):.1f} MB")
-        click.echo(f"Backup database size: {backup_size / (1024*1024):.1f} MB")
+        click.echo(f"Current database size: {current_size / (1024 * 1024):.1f} MB")
+        click.echo(f"Backup database size: {backup_size / (1024 * 1024):.1f} MB")
         click.echo(f"Current database last modified: {current_time}")
         click.echo(f"Backup database created: {backup_time}")
         click.echo(f"Time difference: {current_time - backup_time}")
 
-        if click.confirm("Are you sure you want to restore this backup? This will overwrite your current database.", abort=True):
+        if click.confirm(
+            "Are you sure you want to restore this backup? This will overwrite your current database.",
+            abort=True,
+        ):
             restore_backup(date, DEFAULT_DB_PATH)
             click.echo("Backup restored successfully.")
     except Exception as e:
         click.echo(f"Error restoring backup: {str(e)}", err=True)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     cli()
