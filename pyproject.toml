@@ -1,6 +1,6 @@
 [project]
 name = "podsidian"
-version = "0.1.0"
+version = "1.1.0"
 description = "Bridge between Apple Podcasts and Obsidian with AI-powered features"
 authors = [
     {name = "Pedram Amini", email = "pedram@example.com"},
